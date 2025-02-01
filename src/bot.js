@@ -38,6 +38,14 @@ async function startBot() {
         // Handle all messages
         bot.on('message', async (msg) => {
             try {
+                // Save or update user first
+                await queries.saveUser(
+                    msg.from.id,
+                    msg.from.username,
+                    msg.from.first_name,
+                    msg.from.last_name
+                );
+
                 // Skip handling messages from banned users
                 const user = await queries.getUserById(msg.from.id);
                 if (user?.is_banned) {

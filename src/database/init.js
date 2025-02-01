@@ -2,6 +2,7 @@ const { Pool } = require('pg');
 const fs = require('fs').promises;
 const path = require('path');
 const config = require('../config/config');
+const queries = require('./queries');
 
 const pool = new Pool({
     user: config.dbUser,
@@ -19,6 +20,20 @@ async function initDatabase() {
         
         await pool.query(schema);
         console.log('Database schema initialized successfully');
+
+        // Create admin user if they don't exist
+        if (config.adminUserId) {
+            await queries.saveUser(
+                config.adminUserId,
+                'admin',  // Default username
+                'Admin',  // Default first name
+                null,     // Default last name
+                new Date()
+            );
+            
+            // Assign admin role to admin user
+            await queries.assignRole(config.adminUserId, 'Admin', config.adminUserId);
+        }
 
         // Insert default roles if they don't exist
         const defaultRoles = [
