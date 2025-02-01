@@ -31,13 +31,22 @@ function scheduleJobs(bot) {
  */
 async function checkTemporaryBans(bot) {
     try {
+        // Get all users with expired temporary bans
         const bannedUsers = await queries.getBannedUsers();
+        
+        if (!bannedUsers || bannedUsers.length === 0) {
+            return; // No banned users to process
+        }
+
         const now = new Date();
+        logger.info(`Checking ${bannedUsers.length} temporary bans`);
 
         for (const user of bannedUsers) {
-            if (user.ban_until && user.ban_until <= now) {
-                try {
+            try {
+                if (user.ban_until && user.ban_until <= now) {
+                    // Unban user in database
                     await queries.unbanUser(user.user_id);
+                    logger.info(`Unbanned user ${user.user_id} (ban expired)`);
                     
                     // Get all chats where the user was banned
                     const chats = await queries.getUserBannedChats(user.user_id);
@@ -49,17 +58,27 @@ async function checkTemporaryBans(bot) {
                                 chat.chat_id,
                                 `🔓 Ban expired for user @${user.username || user.user_id}`
                             );
+                            logger.info(`Unbanned user ${user.user_id} from chat ${chat.chat_id}`);
                         } catch (error) {
-                            logger.error(`Failed to unban user ${user.user_id} in chat ${chat.chat_id}:`, error);
+                            logger.error(`Failed to unban user ${user.user_id} in chat ${chat.chat_id}:`, {
+                                error: error.message,
+                                stack: error.stack
+                            });
                         }
                     }
-                } catch (error) {
-                    logger.error(`Failed to process unban for user ${user.user_id}:`, error);
                 }
+            } catch (error) {
+                logger.error(`Failed to process unban for user ${user.user_id}:`, {
+                    error: error.message,
+                    stack: error.stack
+                });
             }
         }
     } catch (error) {
-        logger.error('Error checking temporary bans:', error);
+        logger.error('Error checking temporary bans:', {
+            error: error.message,
+            stack: error.stack
+        });
     }
 }
 

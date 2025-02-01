@@ -78,6 +78,27 @@ const unbanUser = async (userId) => {
     return pool.query(query, [userId]);
 };
 
+const getBannedUsers = async () => {
+    const query = `
+        SELECT * FROM users 
+        WHERE is_banned = true 
+        AND ban_until IS NOT NULL 
+        AND ban_until <= NOW()
+    `;
+    const result = await pool.query(query);
+    return result.rows;
+};
+
+const getUserBannedChats = async (userId) => {
+    const query = `
+        SELECT DISTINCT chat_id 
+        FROM message_logs 
+        WHERE user_id = $1
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows;
+};
+
 // Message Logging
 const logMessage = async (messageId, userId, chatId, messageType, content) => {
     const query = `
@@ -274,6 +295,8 @@ module.exports = {
     // Ban Management
     banUser,
     unbanUser,
+    getBannedUsers,
+    getUserBannedChats,
     // Message Logging
     logMessage,
     deleteMessage,
