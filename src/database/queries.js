@@ -194,7 +194,7 @@ const getCustomCommand = async (command) => {
 const updateUserActivity = async (userId, type) => {
     const today = new Date().toISOString().split('T')[0];
     const query = `
-        INSERT INTO activity_stats (user_id, date, ${type} = 1)
+        INSERT INTO activity_stats (user_id, date, ${type})
         VALUES ($1, $2, 1)
         ON CONFLICT (user_id, date)
         DO UPDATE SET
