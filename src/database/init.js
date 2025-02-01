@@ -2,7 +2,6 @@ const { Pool } = require('pg');
 const fs = require('fs').promises;
 const path = require('path');
 const config = require('../config/config');
-const queries = require('./queries');
 
 const pool = new Pool({
     user: config.dbUser,
@@ -23,16 +22,17 @@ async function initDatabase() {
 
         // Create admin user if they don't exist
         if (config.adminUserId) {
-            await queries.saveUser(
-                config.adminUserId,
-                'admin',  // Default username
-                'Admin',  // Default first name
-                null,     // Default last name
-                new Date()
-            );
-            
-            // Assign admin role to admin user
-            await queries.assignRole(config.adminUserId, 'Admin', config.adminUserId);
+            // Save admin user directly without using queries.js
+            await pool.query(`
+                INSERT INTO users (user_id, username, first_name, last_name, joined_date)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (user_id) 
+                DO UPDATE SET 
+                    username = EXCLUDED.username,
+                    first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name
+                RETURNING *;
+            `, [config.adminUserId, 'admin', 'Admin', null, new Date()]);
         }
 
         // Insert default roles if they don't exist
@@ -88,6 +88,18 @@ async function initDatabase() {
                 role.permissions.can_create_polls || false,
                 role.permissions.can_invite_users || false
             ]);
+        }
+
+        // Assign admin role to admin user if it exists
+        if (config.adminUserId) {
+            const roleResult = await pool.query('SELECT role_id FROM roles WHERE role_name = $1', ['Admin']);
+            if (roleResult.rows[0]) {
+                await pool.query(`
+                    INSERT INTO user_roles (user_id, role_id, assigned_by)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (user_id, role_id) DO NOTHING
+                `, [config.adminUserId, roleResult.rows[0].role_id, config.adminUserId]);
+            }
         }
 
         console.log('Default roles initialized successfully');
