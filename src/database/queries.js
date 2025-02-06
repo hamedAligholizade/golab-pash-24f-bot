@@ -51,7 +51,9 @@ const getUserRoles = async (userId) => {
 // Ban Management
 const banUser = async (userId, reason, duration, issuedBy) => {
     try {
-        const banUntil = duration ? new Date(Date.now() + (duration * 60 * 1000)) : null;
+        // Convert duration to integer
+        const durationInt = duration ? parseInt(duration) : null;
+        const banUntil = durationInt ? new Date(Date.now() + (durationInt * 60 * 1000)) : null;
         
         // Update user's ban status
         const userQuery = `
@@ -64,7 +66,7 @@ const banUser = async (userId, reason, duration, issuedBy) => {
         await pool.query(userQuery, [userId, banUntil]);
 
         // Log the infraction
-        return await logInfraction(userId, 'BAN', reason, 'BAN', duration, issuedBy);
+        return await logInfraction(userId, 'BAN', reason, 'BAN', durationInt, issuedBy);
     } catch (error) {
         logger.error('Error banning user:', {
             error: error.message,
@@ -95,22 +97,30 @@ const unbanUser = async (userId) => {
 };
 
 const getBannedUsers = async () => {
-    const query = `
-        SELECT u.*, i.created_at as ban_start, i.duration as ban_duration
-        FROM users u
-        JOIN infractions i ON u.user_id = i.user_id
-        WHERE u.is_banned = true 
-        AND i.type = 'BAN'
-        AND i.created_at + (i.duration || ' seconds')::interval <= NOW()
-        AND NOT EXISTS (
-            SELECT 1 FROM infractions i2
-            WHERE i2.user_id = i.user_id
-            AND i2.type = 'BAN'
-            AND i2.created_at > i.created_at
-        );
-    `;
-    const result = await pool.query(query);
-    return result.rows;
+    try {
+        const query = `
+            SELECT u.*, i.created_at as ban_start, i.duration as ban_duration
+            FROM users u
+            JOIN infractions i ON u.user_id = i.user_id
+            WHERE u.is_banned = true 
+            AND i.type = 'BAN'
+            AND i.expires_at <= NOW()
+            AND NOT EXISTS (
+                SELECT 1 FROM infractions i2
+                WHERE i2.user_id = i.user_id
+                AND i2.type = 'BAN'
+                AND i2.expires_at > NOW()
+            )
+            ORDER BY i.created_at DESC;
+        `;
+        const result = await pool.query(query);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting banned users:', {
+            error: error.message
+        });
+        throw error;
+    }
 };
 
 const getUserBannedChats = async (userId) => {
@@ -132,24 +142,58 @@ const getUserBannedChats = async (userId) => {
 
 // Message Logging
 const logMessage = async (messageId, userId, chatId, messageType, content) => {
-    const query = `
-        INSERT INTO message_logs (message_id, user_id, chat_id, message_type, content)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *;
-    `;
-    return pool.query(query, [messageId, userId, chatId, messageType, content]);
+    try {
+        // Validate message type
+        const validTypes = ['TEXT', 'PHOTO', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER', 'ANIMATION'];
+        if (!validTypes.includes(messageType.toUpperCase())) {
+            throw new Error('Invalid message type. Must be one of: ' + validTypes.join(', '));
+        }
+
+        const query = `
+            INSERT INTO message_logs (message_id, user_id, chat_id, message_type, content)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [messageId, userId, chatId, messageType.toUpperCase(), content]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error logging message:', {
+            error: error.message,
+            messageId,
+            userId,
+            chatId,
+            messageType
+        });
+        throw error;
+    }
 };
 
 const deleteMessage = async (messageId, deletedBy) => {
-    const query = `
-        UPDATE message_logs 
-        SET is_deleted = true,
-            deleted_by = $2,
-            deleted_at = CURRENT_TIMESTAMP
-        WHERE message_id = $1
-        RETURNING *;
-    `;
-    return pool.query(query, [messageId, deletedBy]);
+    try {
+        const query = `
+            UPDATE message_logs 
+            SET is_deleted = true,
+                deleted_by = $2,
+                deleted_at = CURRENT_TIMESTAMP
+            WHERE message_id = $1
+            AND is_deleted = false
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [messageId, deletedBy]);
+        
+        if (!result.rows[0]) {
+            throw new Error('Message not found or already deleted');
+        }
+        
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error deleting message:', {
+            error: error.message,
+            messageId,
+            deletedBy
+        });
+        throw error;
+    }
 };
 
 // Infractions
@@ -166,10 +210,10 @@ const logInfraction = async (userId, type, reason, action, duration, issuedBy) =
                 expires_at
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6,
+                $1, $2, $3, $4, $5::integer, $6,
                 CASE 
-                    WHEN $5 IS NOT NULL 
-                    THEN NOW() + ($5 || ' minutes')::interval 
+                    WHEN $5::integer IS NOT NULL 
+                    THEN NOW() + ($5::integer || ' minutes')::interval 
                     ELSE NULL 
                 END
             )
@@ -222,47 +266,103 @@ const getGroupSettings = async (chatId) => {
 };
 
 const updateGroupSettings = async (chatId, settings) => {
-    const query = `
-        INSERT INTO group_settings (
-            chat_id, 
-            welcome_message, 
-            rules,
-            spam_sensitivity,
-            max_warnings,
-            mute_duration,
-            ban_duration
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (chat_id) 
-        DO UPDATE SET
-            welcome_message = EXCLUDED.welcome_message,
-            rules = EXCLUDED.rules,
-            spam_sensitivity = EXCLUDED.spam_sensitivity,
-            max_warnings = EXCLUDED.max_warnings,
-            mute_duration = EXCLUDED.mute_duration,
-            ban_duration = EXCLUDED.ban_duration,
-            updated_at = CURRENT_TIMESTAMP
-        RETURNING *;
-    `;
-    return pool.query(query, [
-        chatId,
-        settings.welcomeMessage,
-        settings.rules,
-        settings.spamSensitivity,
-        settings.maxWarnings,
-        settings.muteDuration,
-        settings.banDuration
-    ]);
+    try {
+        // Validate and convert numeric settings
+        const spamSensitivity = settings.spamSensitivity ? parseInt(settings.spamSensitivity) : 5;
+        const maxWarnings = settings.maxWarnings ? parseInt(settings.maxWarnings) : 3;
+        const muteDuration = settings.muteDuration ? parseInt(settings.muteDuration) : 60;
+        const banDuration = settings.banDuration ? parseInt(settings.banDuration) : 1440;
+
+        // Validate ranges
+        if (spamSensitivity < 1 || spamSensitivity > 10) {
+            throw new Error('Spam sensitivity must be between 1 and 10');
+        }
+        if (maxWarnings < 1) {
+            throw new Error('Max warnings must be at least 1');
+        }
+        if (muteDuration < 1) {
+            throw new Error('Mute duration must be at least 1 minute');
+        }
+        if (banDuration < 1) {
+            throw new Error('Ban duration must be at least 1 minute');
+        }
+
+        const query = `
+            INSERT INTO group_settings (
+                chat_id, 
+                welcome_message, 
+                rules,
+                spam_sensitivity,
+                max_warnings,
+                mute_duration,
+                ban_duration
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (chat_id) 
+            DO UPDATE SET
+                welcome_message = EXCLUDED.welcome_message,
+                rules = EXCLUDED.rules,
+                spam_sensitivity = EXCLUDED.spam_sensitivity,
+                max_warnings = EXCLUDED.max_warnings,
+                mute_duration = EXCLUDED.mute_duration,
+                ban_duration = EXCLUDED.ban_duration,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING *;
+        `;
+        
+        const result = await pool.query(query, [
+            chatId,
+            settings.welcomeMessage,
+            settings.rules,
+            spamSensitivity,
+            maxWarnings,
+            muteDuration,
+            banDuration
+        ]);
+        
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error updating group settings:', {
+            error: error.message,
+            chatId,
+            settings
+        });
+        throw error;
+    }
 };
 
 // Content Moderation
 const addBannedContent = async (content, contentType, severity, addedBy) => {
-    const query = `
-        INSERT INTO banned_content (content, content_type, severity, added_by)
-        VALUES ($1, $2, $3, $4)
-        RETURNING *;
-    `;
-    return pool.query(query, [content, contentType, severity, addedBy]);
+    try {
+        // Validate severity
+        const severityInt = parseInt(severity);
+        if (isNaN(severityInt) || severityInt < 1 || severityInt > 5) {
+            throw new Error('Severity must be a number between 1 and 5');
+        }
+
+        // Validate content type
+        const validTypes = ['WORD', 'PHRASE', 'REGEX', 'LINK'];
+        if (!validTypes.includes(contentType.toUpperCase())) {
+            throw new Error('Invalid content type. Must be one of: ' + validTypes.join(', '));
+        }
+
+        const query = `
+            INSERT INTO banned_content (content, content_type, severity, added_by)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [content, contentType.toUpperCase(), severityInt, addedBy]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error adding banned content:', {
+            error: error.message,
+            content,
+            contentType,
+            severity,
+            addedBy
+        });
+        throw error;
+    }
 };
 
 const getBannedContent = async () => {
@@ -273,16 +373,38 @@ const getBannedContent = async () => {
 
 // Custom Commands
 const addCustomCommand = async (command, response, createdBy) => {
-    const query = `
-        INSERT INTO custom_commands (command, response, created_by)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (command) 
-        DO UPDATE SET
-            response = EXCLUDED.response,
-            created_by = EXCLUDED.created_by
-        RETURNING *;
-    `;
-    return pool.query(query, [command, response, createdBy]);
+    try {
+        // Validate command format
+        if (!command.startsWith('/')) {
+            throw new Error('Custom commands must start with /');
+        }
+        if (command.length < 2) {
+            throw new Error('Command must be at least 2 characters long');
+        }
+        if (!response || response.trim().length === 0) {
+            throw new Error('Response cannot be empty');
+        }
+
+        const query = `
+            INSERT INTO custom_commands (command, response, created_by)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (command) 
+            DO UPDATE SET
+                response = EXCLUDED.response,
+                created_by = EXCLUDED.created_by,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [command.toLowerCase(), response, createdBy]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error adding custom command:', {
+            error: error.message,
+            command,
+            createdBy
+        });
+        throw error;
+    }
 };
 
 const getCustomCommand = async (command) => {
@@ -540,40 +662,67 @@ const submitFeedback = async (userId, content) => {
 };
 
 const updateFeedbackStatus = async (feedbackId, status, reviewedBy) => {
-    const query = `
-        UPDATE feedback
-        SET status = $2,
-            reviewed_by = $3
-        WHERE feedback_id = $1
-        RETURNING *;
-    `;
-    return pool.query(query, [feedbackId, status, reviewedBy]);
+    try {
+        const query = `
+            UPDATE feedback
+            SET status = $2,
+                reviewed_by = $3,
+                reviewed_at = CURRENT_TIMESTAMP
+            WHERE feedback_id = $1
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [feedbackId, status, reviewedBy]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error updating feedback status:', {
+            error: error.message,
+            feedbackId,
+            status
+        });
+        throw error;
+    }
 };
 
 const getExpiredRestrictions = async () => {
-    const query = `
-        SELECT DISTINCT i.user_id, i.type, i.duration, i.created_at, u.username, u.first_name, u.last_name,
-               m.chat_id
-        FROM infractions i
-        JOIN users u ON i.user_id = u.user_id
-        JOIN message_logs m ON i.user_id = m.user_id
-        WHERE i.type IN ('BAN', 'MUTE')
-        AND i.created_at + i.duration <= NOW()
-        AND NOT EXISTS (
-            SELECT 1 FROM infractions i2
-            WHERE i2.user_id = i.user_id
-            AND i2.type = i.type
-            AND i2.created_at > i.created_at
-        )
-        ORDER BY i.created_at DESC;
-    `;
-    const result = await pool.query(query);
-    return result.rows;
+    try {
+        const query = `
+            SELECT DISTINCT 
+                i.user_id, 
+                i.type, 
+                i.duration, 
+                i.created_at, 
+                i.expires_at,
+                u.username, 
+                u.first_name, 
+                u.last_name,
+                m.chat_id
+            FROM infractions i
+            JOIN users u ON i.user_id = u.user_id
+            JOIN message_logs m ON i.user_id = m.user_id
+            WHERE i.type IN ('BAN', 'MUTE')
+            AND i.expires_at <= NOW()
+            AND NOT EXISTS (
+                SELECT 1 FROM infractions i2
+                WHERE i2.user_id = i.user_id
+                AND i2.type = i.type
+                AND i2.expires_at > NOW()
+            )
+            ORDER BY i.created_at DESC;
+        `;
+        const result = await pool.query(query);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting expired restrictions:', {
+            error: error.message
+        });
+        throw error;
+    }
 };
 
 const removeRestriction = async (userId, type) => {
     try {
         let query;
+        let params;
         if (type === 'BAN') {
             query = `
                 UPDATE users 
@@ -582,18 +731,26 @@ const removeRestriction = async (userId, type) => {
                 WHERE user_id = $1
                 RETURNING *;
             `;
+            params = [userId];
         } else if (type === 'MUTE') {
-            // For mute, we just log that it's been removed since the actual unmute happens in Telegram
             query = `
                 INSERT INTO infractions (user_id, type, reason, action, duration, issued_by)
                 VALUES ($1, $2, 'Restriction expired automatically', 'UNMUTE', 0, NULL)
                 RETURNING *;
             `;
+            params = [userId, type];
+        } else {
+            throw new Error('Invalid restriction type');
         }
-        const result = await pool.query(query, [userId]);
+        
+        const result = await pool.query(query, params);
         return result.rows[0];
     } catch (error) {
-        logger.error('Error removing restriction:', error);
+        logger.error('Error removing restriction:', {
+            error: error.message,
+            userId,
+            type
+        });
         throw error;
     }
 };
@@ -650,29 +807,88 @@ const getExpiredBans = async () => {
 const getExpiredMutes = async () => {
     try {
         const query = `
-            SELECT user_id, chat_id
-            FROM muted_users
-            WHERE muted_until <= NOW();
+            SELECT 
+                mu.user_id,
+                mu.chat_id,
+                mu.muted_until,
+                mu.reason,
+                mu.muted_by,
+                u.username,
+                u.first_name,
+                u.last_name,
+                mb.username as muted_by_username,
+                mb.first_name as muted_by_first_name
+            FROM muted_users mu
+            JOIN users u ON mu.user_id = u.user_id
+            LEFT JOIN users mb ON mu.muted_by = mb.user_id
+            WHERE mu.muted_until <= NOW()
+            AND NOT EXISTS (
+                -- Check if there's no newer mute that's still active
+                SELECT 1 FROM muted_users mu2
+                WHERE mu2.user_id = mu.user_id
+                AND mu2.chat_id = mu.chat_id
+                AND mu2.muted_until > NOW()
+                AND mu2.created_at > mu.created_at
+            )
+            ORDER BY mu.muted_until ASC;
         `;
         const result = await pool.query(query);
         return result.rows;
     } catch (error) {
-        logger.error('Error getting expired mutes:', error);
+        logger.error('Error getting expired mutes:', {
+            error: error.message,
+            stack: error.stack
+        });
         throw error;
     }
 };
 
-const unmuteMember = async (userId, chatId) => {
+const unmuteMember = async (userId, chatId, unmutedBy = null) => {
     try {
+        // Validate parameters
+        if (!userId || !chatId) {
+            throw new Error('Missing required parameters');
+        }
+
+        // Check if user is actually muted
+        const muteCheck = await pool.query(
+            'SELECT * FROM muted_users WHERE user_id = $1 AND chat_id = $2',
+            [userId, chatId]
+        );
+        
+        if (!muteCheck.rows[0]) {
+            throw new Error('User is not muted in this chat');
+        }
+
+        // Remove from muted_users table
         const query = `
             DELETE FROM muted_users
             WHERE user_id = $1 AND chat_id = $2
             RETURNING *;
         `;
         const result = await pool.query(query, [userId, chatId]);
-        return result.rows[0];
+
+        // Log the unmute action
+        await logInfraction(
+            userId,
+            'UNMUTE',
+            'Manual unmute' + (unmutedBy ? ' by moderator' : ''),
+            'UNMUTE',
+            0,
+            unmutedBy
+        );
+
+        return {
+            unmuted: result.rows[0],
+            previousMute: muteCheck.rows[0]
+        };
     } catch (error) {
-        logger.error('Error unmuting member:', error);
+        logger.error('Error unmuting member:', {
+            error: error.message,
+            userId,
+            chatId,
+            unmutedBy
+        });
         throw error;
     }
 };
@@ -680,8 +896,31 @@ const unmuteMember = async (userId, chatId) => {
 // Mute Management
 const muteUser = async (userId, chatId, duration, reason, mutedBy) => {
     try {
-        const mutedUntil = new Date(Date.now() + (duration * 60 * 1000));
+        // Validate parameters
+        if (!userId || !chatId || !duration || !mutedBy) {
+            throw new Error('Missing required parameters');
+        }
+
+        // Convert and validate duration
+        const durationInt = parseInt(duration);
+        if (isNaN(durationInt)) {
+            throw new Error('Duration must be a valid number');
+        }
+        if (durationInt <= 0) {
+            throw new Error('Duration must be greater than 0');
+        }
+        if (durationInt > 43200) { // Max 30 days
+            throw new Error('Duration cannot exceed 30 days (43200 minutes)');
+        }
+
+        const mutedUntil = new Date(Date.now() + (durationInt * 60 * 1000));
         
+        // Check if user exists
+        const userExists = await pool.query('SELECT 1 FROM users WHERE user_id = $1', [userId]);
+        if (!userExists.rows[0]) {
+            throw new Error('User not found');
+        }
+
         // Insert into muted_users table
         const muteQuery = `
             INSERT INTO muted_users (user_id, chat_id, muted_until, muted_by, reason)
@@ -689,18 +928,40 @@ const muteUser = async (userId, chatId, duration, reason, mutedBy) => {
             ON CONFLICT (user_id, chat_id) 
             DO UPDATE SET
                 muted_until = EXCLUDED.muted_until,
-                reason = EXCLUDED.reason
+                reason = EXCLUDED.reason,
+                muted_by = EXCLUDED.muted_by,
+                updated_at = CURRENT_TIMESTAMP
             RETURNING *;
         `;
-        await pool.query(muteQuery, [userId, chatId, mutedUntil, mutedBy, reason]);
+        const muteResult = await pool.query(muteQuery, [
+            userId, 
+            chatId, 
+            mutedUntil, 
+            mutedBy, 
+            reason || 'No reason provided'
+        ]);
 
         // Log the infraction
-        return await logInfraction(userId, 'MUTE', reason, 'MUTE', duration, mutedBy);
+        const infraction = await logInfraction(
+            userId, 
+            'MUTE', 
+            reason || 'No reason provided', 
+            'MUTE', 
+            durationInt, 
+            mutedBy
+        );
+
+        return {
+            mute: muteResult.rows[0],
+            infraction
+        };
     } catch (error) {
         logger.error('Error muting user:', {
             error: error.message,
             userId,
-            chatId
+            chatId,
+            duration,
+            mutedBy
         });
         throw error;
     }
