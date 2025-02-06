@@ -368,13 +368,15 @@ const updateFeedbackStatus = async (feedbackId, status, reviewedBy) => {
 
 const getExpiredRestrictions = async () => {
     const query = `
-        SELECT DISTINCT i.user_id, i.type, i.duration, i.created_at, u.username, u.first_name, u.last_name,
+        SELECT DISTINCT i.user_id, i.type, i.duration, i.created_at, i.id as infraction_id,
+               u.username, u.first_name, u.last_name,
                m.chat_id
         FROM infractions i
         JOIN users u ON i.user_id = u.user_id
         JOIN message_logs m ON i.user_id = m.user_id
         WHERE i.type IN ('BAN', 'MUTE')
         AND i.created_at + i.duration <= NOW()
+        AND i.processed = false
         AND NOT EXISTS (
             SELECT 1 FROM infractions i2
             WHERE i2.user_id = i.user_id
@@ -387,7 +389,7 @@ const getExpiredRestrictions = async () => {
     return result.rows;
 };
 
-const removeRestriction = async (userId, type) => {
+const removeRestriction = async (userId, type, infractionId) => {
     let query;
     if (type === 'BAN') {
         query = `
@@ -395,18 +397,23 @@ const removeRestriction = async (userId, type) => {
             SET is_banned = false, 
                 ban_reason = null,
                 ban_until = null
-            WHERE user_id = $1
+            WHERE user_id = $1;
+            
+            UPDATE infractions
+            SET processed = true
+            WHERE id = $2
             RETURNING *;
         `;
+        return pool.query(query, [userId, infractionId]);
     } else if (type === 'MUTE') {
-        // For mute, we just log that it's been removed since the actual unmute happens in Telegram
         query = `
-            INSERT INTO infractions (user_id, type, description, action_taken, duration, enforced_by)
-            VALUES ($1, $2, 'Restriction expired automatically', 'UNMUTE', 0, NULL)
+            UPDATE infractions
+            SET processed = true
+            WHERE id = $1
             RETURNING *;
         `;
+        return pool.query(query, [infractionId]);
     }
-    return pool.query(query, [userId]);
 };
 
 const getUserRestrictedChats = async (userId, type) => {

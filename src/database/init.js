@@ -103,6 +103,35 @@ async function initDatabase() {
         }
 
         console.log('Default roles initialized successfully');
+
+        // Create infractions table if it doesn't exist
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS infractions (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                description TEXT,
+                action_taken VARCHAR(50),
+                duration INTERVAL,
+                enforced_by BIGINT,
+                processed BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        
+        // Add processed column if it doesn't exist
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 
+                    FROM information_schema.columns 
+                    WHERE table_name='infractions' AND column_name='processed'
+                ) THEN
+                    ALTER TABLE infractions ADD COLUMN processed BOOLEAN DEFAULT false;
+                END IF;
+            END $$;
+        `);
     } catch (error) {
         console.error('Error initializing database:', error);
         throw error;
