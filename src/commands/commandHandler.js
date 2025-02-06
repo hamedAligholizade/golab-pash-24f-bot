@@ -187,7 +187,11 @@ const commands = {
 
             // Ban the user
             await queries.banUser(targetUser.id, reason, duration, msg.from.id);
-            await bot.banChatMember(msg.chat.id, targetUser.id, {
+            await bot.restrictChatMember(msg.chat.id, targetUser.id, {
+                can_send_messages: false,
+                can_send_media_messages: false,
+                can_send_other_messages: false,
+                can_add_web_page_previews: false,
                 until_date: Math.floor(Date.now() / 1000) + (duration * 60)
             });
             
