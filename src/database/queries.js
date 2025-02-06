@@ -213,10 +213,10 @@ const logInfraction = async (userId, type, reason, action, duration, issuedBy) =
                 expires_at
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6,
+                $1, $2, $3, $4, $5::integer, $6,
                 CASE 
-                    WHEN $5 IS NOT NULL 
-                    THEN NOW() + ($5 * interval '1 minute')
+                    WHEN $5::integer IS NOT NULL 
+                    THEN NOW() + ($5::integer * interval '1 minute')
                     ELSE NULL 
                 END
             )
@@ -927,13 +927,14 @@ const muteUser = async (userId, chatId, duration, reason, mutedBy) => {
 
         // Insert into muted_users table
         const muteQuery = `
-            INSERT INTO muted_users (user_id, chat_id, muted_until, muted_by, reason)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO muted_users (user_id, chat_id, muted_until, muted_by, reason, duration)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (user_id, chat_id) 
             DO UPDATE SET
                 muted_until = EXCLUDED.muted_until,
                 reason = EXCLUDED.reason,
                 muted_by = EXCLUDED.muted_by,
+                duration = EXCLUDED.duration,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING *;
         `;
@@ -942,16 +943,17 @@ const muteUser = async (userId, chatId, duration, reason, mutedBy) => {
             chatId, 
             mutedUntil, 
             mutedBy, 
-            reason || 'No reason provided'
+            reason || 'No reason provided',
+            durationInt
         ]);
 
-        // Log the infraction
+        // Log the infraction with the integer duration
         const infraction = await logInfraction(
             userId, 
             'MUTE', 
             reason || 'No reason provided', 
             'MUTE', 
-            durationInt, 
+            durationInt, // Pass the integer value
             mutedBy
         );
 
