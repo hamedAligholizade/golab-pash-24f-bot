@@ -82,49 +82,54 @@ function writeLog(level, message, metadata = null) {
 /**
  * Clean sensitive data from objects before logging
  * @param {Object} obj Object to clean
- * @param {Set} [seen] Set of already processed objects to handle circular references
  * @returns {Object} Cleaned object
  */
-function cleanSensitiveData(obj, seen = new Set()) {
+function cleanSensitiveData(obj) {
+    const sensitiveKeys = ['password', 'token', 'secret', 'key', 'auth'];
+    
+    // Handle non-objects and null
     if (!obj || typeof obj !== 'object') {
         return obj;
     }
 
-    // Handle circular references
-    if (seen.has(obj)) {
-        return '[Circular]';
-    }
-    seen.add(obj);
+    try {
+        // Use JSON methods to handle circular references automatically
+        const stringified = JSON.stringify(obj, (key, value) => {
+            // Handle Error objects
+            if (value instanceof Error) {
+                return {
+                    name: value.name,
+                    message: value.message,
+                    stack: value.stack
+                };
+            }
 
-    const sensitiveKeys = ['password', 'token', 'secret', 'key', 'auth'];
-    
-    // Handle arrays
-    if (Array.isArray(obj)) {
-        return obj.map(item => cleanSensitiveData(item, seen));
-    }
+            // Redact sensitive values
+            if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
+                return '[REDACTED]';
+            }
 
-    // Handle Error objects
-    if (obj instanceof Error) {
+            return value;
+        });
+
+        return JSON.parse(stringified);
+    } catch (error) {
+        // If JSON.stringify fails (e.g., due to circular references), return a simplified object
+        if (obj instanceof Error) {
+            return {
+                name: obj.name,
+                message: obj.message,
+                stack: obj.stack
+            };
+        }
+
+        // For other objects, return a basic representation
         return {
-            name: obj.name,
-            message: obj.message,
-            stack: obj.stack
+            type: obj.constructor.name,
+            toString: obj.toString(),
+            error: 'Object could not be fully serialized'
         };
     }
-
-    const cleaned = {};
-    for (const [key, value] of Object.entries(obj)) {
-        // Check if the key contains sensitive information
-        if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
-            cleaned[key] = '[REDACTED]';
-        } else if (value && typeof value === 'object') {
-            cleaned[key] = cleanSensitiveData(value, seen);
-        } else {
-            cleaned[key] = value;
-        }
-    }
-
-    return cleaned;
 }
 
 // Logger interface
