@@ -13,17 +13,6 @@ CREATE TABLE IF NOT EXISTS users (
     total_commands INTEGER DEFAULT 0
 );
 
--- Activity stats table
-CREATE TABLE IF NOT EXISTS activity_stats (
-    stat_id SERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES users(user_id),
-    date DATE NOT NULL,
-    messages_sent INTEGER DEFAULT 0,
-    reactions_added INTEGER DEFAULT 0,
-    commands_used INTEGER DEFAULT 0,
-    UNIQUE(user_id, date)
-);
-
 -- Roles table
 CREATE TABLE IF NOT EXISTS roles (
     role_id SERIAL PRIMARY KEY,
@@ -164,46 +153,6 @@ CREATE TABLE IF NOT EXISTS muted_users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Banned content
-CREATE TABLE IF NOT EXISTS banned_content (
-    content_id SERIAL PRIMARY KEY,
-    content TEXT NOT NULL,
-    content_type VARCHAR(50) NOT NULL, -- TEXT, REGEX, MEDIA
-    severity INTEGER DEFAULT 1,
-    added_by BIGINT REFERENCES users(user_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT true
-);
-
--- Custom commands
-CREATE TABLE IF NOT EXISTS custom_commands (
-    command_id SERIAL PRIMARY KEY,
-    command VARCHAR(50) UNIQUE NOT NULL,
-    response TEXT NOT NULL,
-    created_by BIGINT REFERENCES users(user_id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT true
-);
-
--- Achievements
-CREATE TABLE IF NOT EXISTS achievements (
-    achievement_id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    requirement_type VARCHAR(50), -- MESSAGES, REACTIONS, COMMANDS, DAYS_ACTIVE
-    requirement_count INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- User achievements
-CREATE TABLE IF NOT EXISTS user_achievements (
-    user_id BIGINT REFERENCES users(user_id),
-    achievement_id INTEGER REFERENCES achievements(achievement_id),
-    awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (user_id, achievement_id)
-);
-
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
@@ -215,10 +164,6 @@ CREATE INDEX IF NOT EXISTS idx_event_participants_event_id ON event_participants
 CREATE INDEX IF NOT EXISTS idx_user_activity_user_id ON user_activity(user_id);
 CREATE INDEX IF NOT EXISTS idx_muted_users_user_id ON muted_users(user_id);
 CREATE INDEX IF NOT EXISTS idx_muted_users_chat_id ON muted_users(chat_id);
-CREATE INDEX IF NOT EXISTS idx_activity_stats_user_id_date ON activity_stats(user_id, date);
-CREATE INDEX IF NOT EXISTS idx_banned_content_type ON banned_content(content_type);
-CREATE INDEX IF NOT EXISTS idx_custom_commands_active ON custom_commands(command) WHERE is_active = true;
-CREATE INDEX IF NOT EXISTS idx_user_achievements_user ON user_achievements(user_id);
 
 -- Add triggers for updating timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -231,10 +176,5 @@ $$ language 'plpgsql';
 
 CREATE TRIGGER update_group_settings_updated_at
     BEFORE UPDATE ON group_settings
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_custom_commands_updated_at
-    BEFORE UPDATE ON custom_commands
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
