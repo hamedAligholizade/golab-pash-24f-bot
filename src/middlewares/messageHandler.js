@@ -7,37 +7,117 @@ async function handleMessage(bot, msg, messageCache) {
     try {
         const chatId = msg.chat.id;
         const userId = msg.from.id;
-        const settings = await queries.getGroupSettings(chatId);
+
+        // Log message processing start
+        logger.info(`Processing message from user ${userId} in chat ${chatId}`);
+
+        // Get group settings
+        let settings;
+        try {
+            settings = await queries.getGroupSettings(chatId);
+        } catch (error) {
+            logger.error('Failed to fetch group settings:', {
+                error: error.message,
+                stack: error.stack,
+                chatId,
+                userId
+            });
+            throw new Error('Failed to fetch group settings');
+        }
 
         // Skip processing for admin messages
-        if (await isAdmin(msg.from.id, chatId)) {
-            return;
+        try {
+            if (await isAdmin(msg.from.id, chatId)) {
+                return;
+            }
+        } catch (error) {
+            logger.error('Failed to check admin status:', {
+                error: error.message,
+                stack: error.stack,
+                userId,
+                chatId
+            });
+            throw new Error('Failed to check admin status');
         }
 
         // Anti-spam check
         if (config.enableAntiSpam) {
-            const isSpamMessage = await checkSpam(msg, messageCache, settings?.spam_sensitivity || config.defaultSpamSensitivity);
-            if (isSpamMessage) {
-                await handleSpam(bot, msg, settings);
-                return;
+            try {
+                const isSpamMessage = await checkSpam(msg, messageCache, settings?.spam_sensitivity || config.defaultSpamSensitivity);
+                if (isSpamMessage) {
+                    await handleSpam(bot, msg, settings);
+                    return;
+                }
+            } catch (error) {
+                logger.error('Failed to perform spam check:', {
+                    error: error.message,
+                    stack: error.stack,
+                    userId,
+                    chatId,
+                    messageId: msg.message_id
+                });
+                throw new Error('Failed to perform spam check');
             }
         }
 
         // Content filter check
         if (config.enableContentFilter && msg.text) {
-            const bannedContent = await queries.getBannedContent();
-            const violatedContent = await containsBannedContent(msg.text, bannedContent);
-            
-            if (violatedContent) {
-                await handleBannedContent(bot, msg, violatedContent, settings);
-                return;
+            try {
+                const bannedContent = await queries.getBannedContent();
+                const violatedContent = await containsBannedContent(msg.text, bannedContent);
+                
+                if (violatedContent) {
+                    await handleBannedContent(bot, msg, violatedContent, settings);
+                    return;
+                }
+            } catch (error) {
+                logger.error('Failed to check content filter:', {
+                    error: error.message,
+                    stack: error.stack,
+                    userId,
+                    chatId,
+                    messageId: msg.message_id
+                });
+                throw new Error('Failed to check content filter');
             }
         }
 
         // Update message cache for spam detection
-        updateMessageCache(msg, messageCache);
+        try {
+            updateMessageCache(msg, messageCache);
+        } catch (error) {
+            logger.error('Failed to update message cache:', {
+                error: error.message,
+                stack: error.stack,
+                userId,
+                chatId,
+                messageId: msg.message_id
+            });
+            // Don't throw here as this is not critical
+        }
+
+        // Log successful message processing
+        logger.info(`Successfully processed message from user ${userId} in chat ${chatId}`);
+
     } catch (error) {
-        logger.error('Error handling message:', error);
+        logger.error('Error handling message:', {
+            error: error.message,
+            stack: error.stack,
+            userId: msg?.from?.id,
+            chatId: msg?.chat?.id,
+            messageId: msg?.message_id,
+            messageType: msg?.text ? 'text' : 'media'
+        });
+
+        // Try to notify the user about the error
+        try {
+            await bot.sendMessage(msg.chat.id, 'Sorry, there was an error processing your message. Please try again later.');
+        } catch (notifyError) {
+            logger.error('Failed to notify user about error:', {
+                error: notifyError.message,
+                originalError: error.message
+            });
+        }
     }
 }
 

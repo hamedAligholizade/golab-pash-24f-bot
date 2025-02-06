@@ -250,14 +250,82 @@ async function handleCommand(bot, msg) {
         const command = msg.text.split(' ')[0].toLowerCase();
         const handler = commands[command];
 
+        // Log command processing start
+        logger.info(`Processing command ${command} from user ${msg.from.id} in chat ${msg.chat.id}`);
+
         if (handler) {
-            await handler(bot, msg);
-            // Log command usage
-            await queries.updateUserActivity(msg.from.id, 'commands_used');
+            try {
+                await handler(bot, msg);
+                
+                // Log command usage
+                try {
+                    await queries.updateUserActivity(msg.from.id, 'commands_used');
+                } catch (activityError) {
+                    logger.error('Failed to update command usage activity:', {
+                        error: activityError.message,
+                        stack: activityError.stack,
+                        userId: msg.from.id,
+                        command
+                    });
+                    // Don't throw here as this is not critical
+                }
+
+                // Log successful command execution
+                logger.info(`Successfully executed command ${command} for user ${msg.from.id}`);
+            } catch (handlerError) {
+                logger.error('Command handler execution failed:', {
+                    error: handlerError.message,
+                    stack: handlerError.stack,
+                    command,
+                    userId: msg.from.id,
+                    chatId: msg.chat.id
+                });
+
+                // Send appropriate error message to user
+                let errorMessage = 'Sorry, there was an error executing your command.';
+                if (handlerError.message.includes('permission')) {
+                    errorMessage = 'You do not have permission to use this command.';
+                } else if (handlerError.message.includes('not found')) {
+                    errorMessage = 'The specified user or resource was not found.';
+                } else if (handlerError.message.includes('invalid format')) {
+                    errorMessage = 'Invalid command format. Please check the command syntax.';
+                }
+
+                try {
+                    await bot.sendMessage(msg.chat.id, errorMessage);
+                } catch (notifyError) {
+                    logger.error('Failed to send error message to user:', {
+                        error: notifyError.message,
+                        originalError: handlerError.message
+                    });
+                }
+            }
+        } else {
+            // Log unknown command
+            logger.warn(`Unknown command attempted: ${command}`, {
+                userId: msg.from.id,
+                chatId: msg.chat.id
+            });
         }
     } catch (error) {
-        logger.error('Error handling command:', error);
-        await bot.sendMessage(msg.chat.id, 'An error occurred while processing your command. Please try again.');
+        logger.error('Error handling command:', {
+            error: error.message,
+            stack: error.stack,
+            command: msg?.text?.split(' ')[0],
+            userId: msg?.from?.id,
+            chatId: msg?.chat?.id,
+            messageId: msg?.message_id
+        });
+
+        // Try to notify the user about the error
+        try {
+            await bot.sendMessage(msg.chat.id, 'Sorry, there was an error processing your command. Please try again later.');
+        } catch (notifyError) {
+            logger.error('Failed to notify user about error:', {
+                error: notifyError.message,
+                originalError: error.message
+            });
+        }
     }
 }
 
