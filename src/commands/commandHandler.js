@@ -243,7 +243,7 @@ Commands Used: ${userStats.total_commands}
         }
 
         const args = msg.text.split(' ');
-        if (args.length < 3) {
+        if (args.length < 2) {
             await bot.sendMessage(msg.chat.id, 'Usage: !warn <@username or user_id> <reason>\nExample: !warn @user spamming\nOr reply to a message with: !warn reason');
             return;
         }
