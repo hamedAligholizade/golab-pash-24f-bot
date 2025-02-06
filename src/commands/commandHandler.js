@@ -244,34 +244,48 @@ Commands Used: ${userStats.total_commands}
 
         const args = msg.text.split(' ');
         if (args.length < 3) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !warn <user> <reason>\nYou can specify user by username (@username) or by replying to their message.');
+            await bot.sendMessage(msg.chat.id, 'Usage: !warn <@username or user_id> <reason>\nExample: !warn @user spamming\nOr reply to a message with: !warn reason');
             return;
         }
 
         let targetUser;
-        const reason = args.slice(2).join(' ');
+        let reason;
 
         try {
             // Check if command is a reply to a message
             if (msg.reply_to_message) {
                 targetUser = msg.reply_to_message.from;
+                reason = args.slice(1).join(' ');
             } else {
                 // Get user by username or ID
-                const userIdentifier = args[1].replace('@', '');
+                const userIdentifier = args[1].startsWith('@') ? args[1].substring(1) : args[1];
+                reason = args.slice(2).join(' ');
+
                 try {
                     // Try to parse as user ID first
                     const userId = parseInt(userIdentifier);
                     if (!isNaN(userId)) {
+                        logger.debug(`Attempting to get chat member by ID: ${userId}`);
                         const chatMember = await bot.getChatMember(msg.chat.id, userId);
                         targetUser = chatMember.user;
                     } else {
                         // If not a number, treat as username
-                        const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                        logger.debug(`Attempting to get chat member by username: ${userIdentifier}`);
+                        const chatMember = await bot.getChatMember(msg.chat.id, `@${userIdentifier}`);
                         targetUser = chatMember.user;
                     }
                 } catch (error) {
-                    throw new Error('Could not find user. Make sure the username or ID is correct.');
+                    logger.error('Error getting chat member:', {
+                        error: error.message,
+                        userIdentifier,
+                        chatId: msg.chat.id
+                    });
+                    throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username or ID is correct and the user is in the chat.`);
                 }
+            }
+
+            if (!targetUser) {
+                throw new Error('Could not identify the target user. Please use a valid @username or user ID, or reply to the user\'s message.');
             }
 
             // Don't allow warning admins/moderators
@@ -308,13 +322,14 @@ Commands Used: ${userStats.total_commands}
                 );
             }
         } catch (error) {
-            logger.error('Error warning user:', error);
-            await bot.sendMessage(
-                msg.chat.id,
-                error.message === 'Could not find user. Make sure the username or ID is correct.'
-                    ? error.message
-                    : 'Failed to warn user. Please check the username/ID and try again.'
-            );
+            logger.error('Error warning user:', {
+                error: error.message,
+                stack: error.stack,
+                command: msg.text,
+                chatId: msg.chat.id,
+                fromUser: msg.from.id
+            });
+            await bot.sendMessage(msg.chat.id, error.message);
         }
     },
 
