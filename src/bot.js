@@ -118,6 +118,48 @@ async function startBot() {
             logger.error('General bot error:', error);
         });
 
+        // Check for expired bans every minute
+        async function checkExpiredBans() {
+            try {
+                // Get all banned users whose ban has expired
+                const expiredBans = await queries.getBannedUsers();
+                
+                for (const user of expiredBans) {
+                    try {
+                        // Get all chats where the user was banned
+                        const bannedChats = await queries.getUserBannedChats(user.user_id);
+                        
+                        // Unban from each chat
+                        for (const chat of bannedChats) {
+                            try {
+                                await bot.unbanChatMember(chat.chat_id, user.user_id);
+                                logger.info(`Automatically unbanned user ${user.user_id} from chat ${chat.chat_id} (ban expired)`);
+                            } catch (chatError) {
+                                logger.error('Failed to unban user from chat:', {
+                                    error: chatError.message,
+                                    userId: user.user_id,
+                                    chatId: chat.chat_id
+                                });
+                            }
+                        }
+
+                        // Update user's ban status in database
+                        await queries.unbanUser(user.user_id);
+                    } catch (userError) {
+                        logger.error('Error processing expired ban for user:', {
+                            error: userError.message,
+                            userId: user.user_id
+                        });
+                    }
+                }
+            } catch (error) {
+                logger.error('Error checking expired bans:', error);
+            }
+        }
+
+        // Start the expired bans check interval
+        setInterval(checkExpiredBans, 60000); // Run every minute
+
         logger.info('Bot is running...');
     } catch (error) {
         logger.error('Failed to start bot:', error);

@@ -94,6 +94,13 @@ const getUserBannedChats = async (userId) => {
         SELECT DISTINCT chat_id 
         FROM message_logs 
         WHERE user_id = $1
+        AND chat_id IN (
+            SELECT chat_id 
+            FROM infractions 
+            WHERE user_id = $1 
+            AND type = 'BAN' 
+            AND created_at >= NOW() - INTERVAL '30 days'
+        )
     `;
     const result = await pool.query(query, [userId]);
     return result.rows;
