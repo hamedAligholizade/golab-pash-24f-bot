@@ -419,7 +419,7 @@ const commands = {
         }
 
         const text = msg.text.trim();
-        const lines = text.split('\n');
+        const lines = text.split('\n').filter(line => line.trim().length > 0);
 
         if (lines.length < 3) {
             const usage = `نحوه استفاده: !poll
@@ -467,7 +467,9 @@ const commands = {
             logger.info('Poll created successfully', {
                 messageId: pollMessage.message_id,
                 chatId: msg.chat.id,
-                createdBy: msg.from.id
+                createdBy: msg.from.id,
+                question,
+                options
             });
         } catch (error) {
             logger.error('Error creating poll:', {
@@ -883,7 +885,9 @@ const commands = {
 
 async function handleCommand(bot, msg) {
     try {
-        const command = msg.text.split(' ')[0].toLowerCase();
+        // Extract the command from the first line
+        const firstLine = msg.text.split('\n')[0].trim();
+        const command = firstLine.split(' ')[0].toLowerCase();
         const handler = commands[command];
 
         // Log command processing start
@@ -891,11 +895,11 @@ async function handleCommand(bot, msg) {
 
         if (handler) {
             try {
-            await handler(bot, msg);
+                await handler(bot, msg);
                 
-            // Log command usage
+                // Log command usage
                 try {
-            await queries.updateUserActivity(msg.from.id, 'commands_used');
+                    await queries.updateUserActivity(msg.from.id, 'command_used');
                 } catch (activityError) {
                     logger.error('Failed to update command usage activity:', {
                         error: activityError.message,
@@ -903,7 +907,6 @@ async function handleCommand(bot, msg) {
                         userId: msg.from.id,
                         command
                     });
-                    // Don't throw here as this is not critical
                 }
 
                 // Log successful command execution
@@ -918,23 +921,16 @@ async function handleCommand(bot, msg) {
                 });
 
                 // Send appropriate error message to user
-                let errorMessage = 'Sorry, there was an error executing your command.';
+                let errorMessage = 'خطا در اجرای دستور.';
                 if (handlerError.message.includes('permission')) {
-                    errorMessage = 'You do not have permission to use this command.';
+                    errorMessage = 'شما دسترسی لازم برای استفاده از این دستور را ندارید.';
                 } else if (handlerError.message.includes('not found')) {
-                    errorMessage = 'The specified user or resource was not found.';
+                    errorMessage = 'کاربر یا منبع مورد نظر یافت نشد.';
                 } else if (handlerError.message.includes('invalid format')) {
-                    errorMessage = 'Invalid command format. Please check the command syntax.';
+                    errorMessage = 'فرمت دستور نامعتبر است. لطفاً دستور را بررسی کنید.';
                 }
 
-                try {
-                    await bot.sendMessage(msg.chat.id, errorMessage);
-                } catch (notifyError) {
-                    logger.error('Failed to send error message to user:', {
-                        error: notifyError.message,
-                        originalError: handlerError.message
-                    });
-                }
+                await bot.sendMessage(msg.chat.id, errorMessage);
             }
         } else {
             // Log unknown command
@@ -947,15 +943,14 @@ async function handleCommand(bot, msg) {
         logger.error('Error handling command:', {
             error: error.message,
             stack: error.stack,
-            command: msg?.text?.split(' ')[0],
+            command: msg?.text?.split('\n')[0],
             userId: msg?.from?.id,
             chatId: msg?.chat?.id,
             messageId: msg?.message_id
         });
 
-        // Try to notify the user about the error
         try {
-            await bot.sendMessage(msg.chat.id, 'Sorry, there was an error processing your command. Please try again later.');
+            await bot.sendMessage(msg.chat.id, 'خطا در پردازش دستور. لطفاً دوباره تلاش کنید.');
         } catch (notifyError) {
             logger.error('Failed to notify user about error:', {
                 error: notifyError.message,
