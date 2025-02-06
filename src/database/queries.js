@@ -199,6 +199,9 @@ const deleteMessage = async (messageId, deletedBy) => {
 // Infractions
 const logInfraction = async (userId, type, reason, action, duration, issuedBy) => {
     try {
+        // Convert duration to integer if provided
+        const durationInt = duration ? parseInt(duration) : null;
+        
         const query = `
             INSERT INTO infractions (
                 user_id, 
@@ -210,23 +213,24 @@ const logInfraction = async (userId, type, reason, action, duration, issuedBy) =
                 expires_at
             )
             VALUES (
-                $1, $2, $3, $4, $5::integer, $6,
+                $1, $2, $3, $4, $5, $6,
                 CASE 
-                    WHEN $5::integer IS NOT NULL 
-                    THEN NOW() + ($5::integer || ' minutes')::interval 
+                    WHEN $5 IS NOT NULL 
+                    THEN NOW() + ($5 * interval '1 minute')
                     ELSE NULL 
                 END
             )
             RETURNING *;
         `;
-        const result = await pool.query(query, [userId, type, reason, action, duration, issuedBy]);
+        const result = await pool.query(query, [userId, type, reason, action, durationInt, issuedBy]);
         return result.rows[0];
     } catch (error) {
         logger.error('Error logging infraction:', {
             error: error.message,
             userId,
             type,
-            action
+            action,
+            duration
         });
         throw error;
     }
