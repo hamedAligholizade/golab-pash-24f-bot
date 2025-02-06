@@ -116,7 +116,7 @@ Commands Used: ${userStats.total_commands}
 
     // Admin Commands
     '!ban': async (bot, msg) => {
-        if (!await isAdmin(msg.from.id, msg.chat.id)) {
+        if (!await isAdmin(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
@@ -160,8 +160,8 @@ Commands Used: ${userStats.total_commands}
             }
 
             // Don't allow banning admins/moderators
-            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id);
-            const isTargetMod = await isModerator(targetUser.id, msg.chat.id);
+            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id, bot);
+            const isTargetMod = await isModerator(targetUser.id, msg.chat.id, bot);
             if (isTargetAdmin || isTargetMod) {
                 await bot.sendMessage(msg.chat.id, '⚠️ You cannot ban administrators or moderators.');
                 return;
@@ -187,7 +187,7 @@ Commands Used: ${userStats.total_commands}
     },
 
     '!unban': async (bot, msg) => {
-        if (!await isAdmin(msg.from.id, msg.chat.id)) {
+        if (!await isAdmin(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
@@ -296,8 +296,8 @@ Commands Used: ${userStats.total_commands}
             }
 
             // Don't allow warning admins/moderators
-            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id);
-            const isTargetMod = await isModerator(targetUser.id, msg.chat.id);
+            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id, bot);
+            const isTargetMod = await isModerator(targetUser.id, msg.chat.id, bot);
             if (isTargetAdmin || isTargetMod) {
                 await bot.sendMessage(msg.chat.id, '⚠️ You cannot warn administrators or moderators.');
                 return;
@@ -341,7 +341,7 @@ Commands Used: ${userStats.total_commands}
     },
 
     '!poll': async (bot, msg) => {
-        if (!await isModerator(msg.from.id, msg.chat.id)) {
+        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
@@ -364,7 +364,7 @@ Commands Used: ${userStats.total_commands}
     },
 
     '!settings': async (bot, msg) => {
-        if (!await isAdmin(msg.from.id, msg.chat.id)) {
+        if (!await isAdmin(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
@@ -392,7 +392,7 @@ To change settings, use:
     },
 
     '!mute': async (bot, msg) => {
-        if (!await isModerator(msg.from.id, msg.chat.id)) {
+        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
@@ -450,8 +450,8 @@ To change settings, use:
             }
 
             // Don't allow muting admins/moderators
-            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id);
-            const isTargetMod = await isModerator(targetUser.id, msg.chat.id);
+            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id, bot);
+            const isTargetMod = await isModerator(targetUser.id, msg.chat.id, bot);
             if (isTargetAdmin || isTargetMod) {
                 await bot.sendMessage(msg.chat.id, '⚠️ You cannot mute administrators or moderators.');
                 return;
@@ -483,7 +483,7 @@ To change settings, use:
     },
 
     '!unmute': async (bot, msg) => {
-        if (!await isModerator(msg.from.id, msg.chat.id)) {
+        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
