@@ -193,7 +193,17 @@ Commands Used: ${userStats.total_commands}
             });
             
             const banMsg = `🚫 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} has been banned for ${duration} minutes.\nReason: ${reason}`;
-            await bot.sendMessage(msg.chat.id, banMsg);
+            try {
+                await bot.sendMessage(msg.chat.id, banMsg);
+            } catch (sendError) {
+                logger.error('Error sending ban message:', {
+                    error: sendError.message,
+                    chatId: msg.chat.id,
+                    targetUser: targetUser.id
+                });
+                // Try sending without the @ mention if that fails
+                await bot.sendMessage(msg.chat.id, `🚫 User has been banned for ${duration} minutes.\nReason: ${reason}`);
+            }
         } catch (error) {
             logger.error('Error banning user:', error);
             await bot.sendMessage(
