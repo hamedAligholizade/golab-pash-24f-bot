@@ -123,25 +123,66 @@ Commands Used: ${userStats.total_commands}
 
         const args = msg.text.split(' ');
         if (args.length < 3) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !ban <user> <duration> <reason>');
+            await bot.sendMessage(msg.chat.id, 'Usage: !ban <user> <duration> <reason>\nDuration in minutes. You can specify user by username (@username) or by replying to their message.');
             return;
         }
 
-        const username = args[1].replace('@', '');
-        const duration = args[2];
+        let targetUser;
+        const duration = parseInt(args[2]);
         const reason = args.slice(3).join(' ');
 
+        if (isNaN(duration) || duration <= 0) {
+            await bot.sendMessage(msg.chat.id, 'Please provide a valid duration in minutes.');
+            return;
+        }
+
         try {
-            const chatMember = await bot.getChatMember(msg.chat.id, username);
-            await queries.banUser(chatMember.user.id, reason, duration, msg.from.id);
-            await bot.banChatMember(msg.chat.id, chatMember.user.id, {
-                until_date: Math.floor(Date.now() / 1000) + (parseInt(duration) * 60)
+            // Check if command is a reply to a message
+            if (msg.reply_to_message) {
+                targetUser = msg.reply_to_message.from;
+            } else {
+                // Get user by username or ID
+                const userIdentifier = args[1].replace('@', '');
+                try {
+                    // Try to parse as user ID first
+                    const userId = parseInt(userIdentifier);
+                    if (!isNaN(userId)) {
+                        const chatMember = await bot.getChatMember(msg.chat.id, userId);
+                        targetUser = chatMember.user;
+                    } else {
+                        // If not a number, treat as username
+                        const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                        targetUser = chatMember.user;
+                    }
+                } catch (error) {
+                    throw new Error('Could not find user. Make sure the username or ID is correct.');
+                }
+            }
+
+            // Don't allow banning admins/moderators
+            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id);
+            const isTargetMod = await isModerator(targetUser.id, msg.chat.id);
+            if (isTargetAdmin || isTargetMod) {
+                await bot.sendMessage(msg.chat.id, '⚠️ You cannot ban administrators or moderators.');
+                return;
+            }
+
+            // Ban the user
+            await queries.banUser(targetUser.id, reason, duration, msg.from.id);
+            await bot.banChatMember(msg.chat.id, targetUser.id, {
+                until_date: Math.floor(Date.now() / 1000) + (duration * 60)
             });
             
-            await bot.sendMessage(msg.chat.id, `User @${username} has been banned for ${duration} minutes.\nReason: ${reason}`);
+            const banMsg = `🚫 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} has been banned for ${duration} minutes.\nReason: ${reason}`;
+            await bot.sendMessage(msg.chat.id, banMsg);
         } catch (error) {
             logger.error('Error banning user:', error);
-            await bot.sendMessage(msg.chat.id, 'Failed to ban user. Please check the username and try again.');
+            await bot.sendMessage(
+                msg.chat.id,
+                error.message === 'Could not find user. Make sure the username or ID is correct.'
+                    ? error.message
+                    : 'Failed to ban user. Please check the username/ID and try again.'
+            );
         }
     },
 
@@ -151,20 +192,47 @@ Commands Used: ${userStats.total_commands}
             return;
         }
 
-        const username = msg.text.split(' ')[1]?.replace('@', '');
-        if (!username) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !unban <user>');
+        const args = msg.text.split(' ');
+        if (args.length < 2) {
+            await bot.sendMessage(msg.chat.id, 'Usage: !unban <user>\nYou can specify user by username (@username) or user ID.');
             return;
         }
 
+        let targetUser;
         try {
-            const chatMember = await bot.getChatMember(msg.chat.id, username);
-            await queries.unbanUser(chatMember.user.id);
-            await bot.unbanChatMember(msg.chat.id, chatMember.user.id);
-            await bot.sendMessage(msg.chat.id, `User @${username} has been unbanned.`);
+            // Get user by username or ID
+            const userIdentifier = args[1].replace('@', '');
+            try {
+                // Try to parse as user ID first
+                const userId = parseInt(userIdentifier);
+                if (!isNaN(userId)) {
+                    targetUser = { id: userId, username: userIdentifier };
+                } else {
+                    // If not a number, treat as username
+                    targetUser = { id: null, username: userIdentifier };
+                }
+            } catch (error) {
+                throw new Error('Could not process user identifier. Please provide a valid username or ID.');
+            }
+
+            // Unban the user
+            if (targetUser.id) {
+                await queries.unbanUser(targetUser.id);
+                await bot.unbanChatMember(msg.chat.id, targetUser.id);
+            } else {
+                await bot.unbanChatMember(msg.chat.id, '@' + targetUser.username);
+            }
+
+            const unbanMsg = `✅ User ${targetUser.username ? '@' + targetUser.username : `ID: ${targetUser.id}`} has been unbanned.`;
+            await bot.sendMessage(msg.chat.id, unbanMsg);
         } catch (error) {
             logger.error('Error unbanning user:', error);
-            await bot.sendMessage(msg.chat.id, 'Failed to unban user. Please check the username and try again.');
+            await bot.sendMessage(
+                msg.chat.id,
+                error.message.includes('Could not process user identifier')
+                    ? error.message
+                    : 'Failed to unban user. Please check the username/ID and try again.'
+            );
         }
     },
 
@@ -176,20 +244,77 @@ Commands Used: ${userStats.total_commands}
 
         const args = msg.text.split(' ');
         if (args.length < 3) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !warn <user> <reason>');
+            await bot.sendMessage(msg.chat.id, 'Usage: !warn <user> <reason>\nYou can specify user by username (@username) or by replying to their message.');
             return;
         }
 
-        const username = args[1].replace('@', '');
+        let targetUser;
         const reason = args.slice(2).join(' ');
 
         try {
-            const chatMember = await bot.getChatMember(msg.chat.id, username);
-            await queries.logInfraction(chatMember.user.id, 'WARN', reason, 'WARN', null, msg.from.id);
-            await bot.sendMessage(msg.chat.id, `⚠️ @${username} has been warned.\nReason: ${reason}`);
+            // Check if command is a reply to a message
+            if (msg.reply_to_message) {
+                targetUser = msg.reply_to_message.from;
+            } else {
+                // Get user by username or ID
+                const userIdentifier = args[1].replace('@', '');
+                try {
+                    // Try to parse as user ID first
+                    const userId = parseInt(userIdentifier);
+                    if (!isNaN(userId)) {
+                        const chatMember = await bot.getChatMember(msg.chat.id, userId);
+                        targetUser = chatMember.user;
+                    } else {
+                        // If not a number, treat as username
+                        const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                        targetUser = chatMember.user;
+                    }
+                } catch (error) {
+                    throw new Error('Could not find user. Make sure the username or ID is correct.');
+                }
+            }
+
+            // Don't allow warning admins/moderators
+            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id);
+            const isTargetMod = await isModerator(targetUser.id, msg.chat.id);
+            if (isTargetAdmin || isTargetMod) {
+                await bot.sendMessage(msg.chat.id, '⚠️ You cannot warn administrators or moderators.');
+                return;
+            }
+
+            // Log the warning
+            await queries.logInfraction(targetUser.id, 'WARN', reason, 'WARN', null, msg.from.id);
+            
+            // Send warning message
+            const warningMsg = `⚠️ ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} has been warned.\nReason: ${reason}`;
+            await bot.sendMessage(msg.chat.id, warningMsg);
+
+            // Get warning count
+            const warnings = await queries.getUserInfractions(targetUser.id);
+            const warningCount = warnings.filter(w => w.type === 'WARN').length;
+            
+            // If user has too many warnings, take additional action
+            const settings = await queries.getGroupSettings(msg.chat.id);
+            const maxWarnings = settings?.max_warnings || config.maxWarnings;
+            
+            if (warningCount >= maxWarnings) {
+                await bot.restrictChatMember(msg.chat.id, targetUser.id, {
+                    can_send_messages: false,
+                    until_date: Math.floor(Date.now() / 1000) + 3600 // 1 hour mute
+                });
+                await bot.sendMessage(
+                    msg.chat.id,
+                    `User has reached ${warningCount} warnings and has been muted for 1 hour.`
+                );
+            }
         } catch (error) {
             logger.error('Error warning user:', error);
-            await bot.sendMessage(msg.chat.id, 'Failed to warn user. Please check the username and try again.');
+            await bot.sendMessage(
+                msg.chat.id,
+                error.message === 'Could not find user. Make sure the username or ID is correct.'
+                    ? error.message
+                    : 'Failed to warn user. Please check the username/ID and try again.'
+            );
         }
     },
 
@@ -242,6 +367,140 @@ To change settings, use:
 !set ban_duration <duration>
 `;
         await bot.sendMessage(msg.chat.id, settingsText);
+    },
+
+    '!mute': async (bot, msg) => {
+        if (!await isModerator(msg.from.id, msg.chat.id)) {
+            await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
+            return;
+        }
+
+        const args = msg.text.split(' ');
+        if (args.length < 3) {
+            await bot.sendMessage(msg.chat.id, 'Usage: !mute <user> <duration> [reason]\nDuration in minutes. You can specify user by username (@username) or by replying to their message.');
+            return;
+        }
+
+        let targetUser;
+        const duration = parseInt(args[2]);
+        const reason = args.length > 3 ? args.slice(3).join(' ') : 'No reason provided';
+
+        if (isNaN(duration) || duration <= 0) {
+            await bot.sendMessage(msg.chat.id, 'Please provide a valid duration in minutes.');
+            return;
+        }
+
+        try {
+            // Check if command is a reply to a message
+            if (msg.reply_to_message) {
+                targetUser = msg.reply_to_message.from;
+            } else {
+                // Get user by username or ID
+                const userIdentifier = args[1].replace('@', '');
+                try {
+                    // Try to parse as user ID first
+                    const userId = parseInt(userIdentifier);
+                    if (!isNaN(userId)) {
+                        const chatMember = await bot.getChatMember(msg.chat.id, userId);
+                        targetUser = chatMember.user;
+                    } else {
+                        // If not a number, treat as username
+                        const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                        targetUser = chatMember.user;
+                    }
+                } catch (error) {
+                    throw new Error('Could not find user. Make sure the username or ID is correct.');
+                }
+            }
+
+            // Don't allow muting admins/moderators
+            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id);
+            const isTargetMod = await isModerator(targetUser.id, msg.chat.id);
+            if (isTargetAdmin || isTargetMod) {
+                await bot.sendMessage(msg.chat.id, '⚠️ You cannot mute administrators or moderators.');
+                return;
+            }
+
+            // Mute the user
+            await bot.restrictChatMember(msg.chat.id, targetUser.id, {
+                can_send_messages: false,
+                can_send_media_messages: false,
+                can_send_other_messages: false,
+                can_add_web_page_previews: false,
+                until_date: Math.floor(Date.now() / 1000) + (duration * 60)
+            });
+
+            // Log the mute
+            await queries.logInfraction(targetUser.id, 'MUTE', reason, 'MUTE', duration * 60, msg.from.id);
+            
+            const muteMsg = `🔇 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} has been muted for ${duration} minutes.\nReason: ${reason}`;
+            await bot.sendMessage(msg.chat.id, muteMsg);
+        } catch (error) {
+            logger.error('Error muting user:', error);
+            await bot.sendMessage(
+                msg.chat.id,
+                error.message === 'Could not find user. Make sure the username or ID is correct.'
+                    ? error.message
+                    : 'Failed to mute user. Please check the username/ID and try again.'
+            );
+        }
+    },
+
+    '!unmute': async (bot, msg) => {
+        if (!await isModerator(msg.from.id, msg.chat.id)) {
+            await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
+            return;
+        }
+
+        const args = msg.text.split(' ');
+        if (args.length < 2) {
+            await bot.sendMessage(msg.chat.id, 'Usage: !unmute <user>\nYou can specify user by username (@username) or by replying to their message.');
+            return;
+        }
+
+        let targetUser;
+        try {
+            // Check if command is a reply to a message
+            if (msg.reply_to_message) {
+                targetUser = msg.reply_to_message.from;
+            } else {
+                // Get user by username or ID
+                const userIdentifier = args[1].replace('@', '');
+                try {
+                    // Try to parse as user ID first
+                    const userId = parseInt(userIdentifier);
+                    if (!isNaN(userId)) {
+                        const chatMember = await bot.getChatMember(msg.chat.id, userId);
+                        targetUser = chatMember.user;
+                    } else {
+                        // If not a number, treat as username
+                        const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                        targetUser = chatMember.user;
+                    }
+                } catch (error) {
+                    throw new Error('Could not find user. Make sure the username or ID is correct.');
+                }
+            }
+
+            // Unmute the user
+            await bot.restrictChatMember(msg.chat.id, targetUser.id, {
+                can_send_messages: true,
+                can_send_media_messages: true,
+                can_send_other_messages: true,
+                can_add_web_page_previews: true
+            });
+            
+            const unmuteMsg = `🔊 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} has been unmuted.`;
+            await bot.sendMessage(msg.chat.id, unmuteMsg);
+        } catch (error) {
+            logger.error('Error unmuting user:', error);
+            await bot.sendMessage(
+                msg.chat.id,
+                error.message === 'Could not find user. Make sure the username or ID is correct.'
+                    ? error.message
+                    : 'Failed to unmute user. Please check the username/ID and try again.'
+            );
+        }
     }
 };
 
