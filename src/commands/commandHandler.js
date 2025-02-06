@@ -269,13 +269,17 @@ Commands Used: ${userStats.total_commands}
                         targetUser = chatMember.user;
                     } else {
                         // If not a number, treat as username
-                        // Get chat members and find by username
-                        const chatMembers = await bot.getChatAdministrators(msg.chat.id); // This gets all members in supergroups
-                        const member = chatMembers.find(m => m.user.username?.toLowerCase() === userIdentifier.toLowerCase());
-                        if (!member) {
+                        try {
+                            const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                            targetUser = chatMember.user;
+                        } catch (error) {
+                            // If direct lookup fails, try getting chat members
+                            const chat = await bot.getChat(msg.chat.id);
+                            if (!chat.username) {
+                                throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
+                            }
                             throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
                         }
-                        targetUser = member.user;
                     }
                 } catch (error) {
                     logger.error('Error getting chat member:', {
@@ -423,11 +427,25 @@ To change settings, use:
                         targetUser = chatMember.user;
                     } else {
                         // If not a number, treat as username
-                        const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
-                        targetUser = chatMember.user;
+                        try {
+                            const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                            targetUser = chatMember.user;
+                        } catch (error) {
+                            // If direct lookup fails, try getting chat members
+                            const chat = await bot.getChat(msg.chat.id);
+                            if (!chat.username) {
+                                throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
+                            }
+                            throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
+                        }
                     }
                 } catch (error) {
-                    throw new Error('Could not find user. Make sure the username or ID is correct.');
+                    logger.error('Error getting chat member:', {
+                        error: error.message,
+                        userIdentifier,
+                        chatId: msg.chat.id
+                    });
+                    throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username or ID is correct and the user is in the chat.`);
                 }
             }
 
