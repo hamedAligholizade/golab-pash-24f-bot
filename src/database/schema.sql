@@ -136,6 +136,14 @@ CREATE TABLE IF NOT EXISTS activity_stats (
     UNIQUE (user_id, date)
 );
 
+-- User achievements
+CREATE TABLE IF NOT EXISTS user_achievements (
+    user_id BIGINT REFERENCES users(user_id),
+    achievement_id VARCHAR(50) NOT NULL,
+    awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, achievement_id)
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_message_logs_user_id ON message_logs(user_id);

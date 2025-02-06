@@ -241,6 +241,62 @@ const getTopUsers = async (limit = 10) => {
     return result.rows;
 };
 
+const getActiveUsers = async () => {
+    const query = `
+        SELECT DISTINCT u.* 
+        FROM users u
+        JOIN activity_stats a ON u.user_id = a.user_id
+        WHERE a.date >= CURRENT_DATE - INTERVAL '7 days'
+    `;
+    const result = await pool.query(query);
+    return result.rows;
+};
+
+const calculateUserStats = async (userId) => {
+    const query = `
+        SELECT 
+            COUNT(*) as total_messages,
+            COUNT(DISTINCT DATE(date)) as active_days_streak,
+            SUM(reactions_added) as total_reactions,
+            COUNT(DISTINCT CASE WHEN commands_used > 0 THEN date END) as unique_commands
+        FROM activity_stats
+        WHERE user_id = $1
+        AND date >= CURRENT_DATE - INTERVAL '30 days'
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows[0];
+};
+
+const getUserAchievements = async (userId) => {
+    const query = `
+        SELECT achievement_id
+        FROM user_achievements
+        WHERE user_id = $1
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows.map(row => row.achievement_id);
+};
+
+const awardAchievement = async (userId, achievementId) => {
+    const query = `
+        INSERT INTO user_achievements (user_id, achievement_id)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, achievement_id) DO NOTHING
+        RETURNING *;
+    `;
+    return pool.query(query, [userId, achievementId]);
+};
+
+const getUserChats = async (userId) => {
+    const query = `
+        SELECT DISTINCT chat_id
+        FROM message_logs
+        WHERE user_id = $1
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows;
+};
+
 // Events
 const createEvent = async (title, description, startTime, endTime, createdBy) => {
     const query = `
@@ -314,6 +370,11 @@ module.exports = {
     // Activity Tracking
     updateUserActivity,
     getTopUsers,
+    getActiveUsers,
+    calculateUserStats,
+    getUserAchievements,
+    awardAchievement,
+    getUserChats,
     // Events
     createEvent,
     updateEventParticipation,
