@@ -208,13 +208,31 @@ const commands = {
             // Log the ban
             await queries.logInfraction(targetUser.id, 'BAN', reason, 'BAN', `${duration} minutes`, msg.from.id);
         } catch (error) {
-            logger.error('Error banning user:', error);
-            await bot.sendMessage(
-                msg.chat.id,
-                error.message === 'Could not find user. Make sure the username or ID is correct.'
-                    ? error.message
-                    : 'خطا در مسدود کردن کاربر. لطفاً نام کاربری/شناسه را بررسی کرده و دوباره تلاش کنید.'
-            );
+            logger.error('Error banning user:', {
+                error: error.message,
+                stack: error.stack,
+                command: msg.text,
+                chatId: msg.chat.id,
+                fromUser: msg.from.id
+            });
+
+            // Send more specific error messages
+            let errorMessage;
+            if (error.message.includes('Could not find user')) {
+                errorMessage = error.message;
+            } else if (error.message.includes('User not found')) {
+                errorMessage = 'کاربر مورد نظر یافت نشد.';
+            } else if (error.message.includes('ETELEGRAM')) {
+                errorMessage = 'خطا در ارتباط با تلگرام. لطفاً دوباره تلاش کنید.';
+            } else if (error.message.includes('Missing required parameters')) {
+                errorMessage = 'پارامترهای مورد نیاز وارد نشده‌اند.';
+            } else if (error.message.includes('Duration must be')) {
+                errorMessage = 'مدت زمان نامعتبر است. لطفاً یک عدد مثبت وارد کنید.';
+            } else {
+                errorMessage = 'خطایی رخ داد. لطفاً دوباره تلاش کنید.';
+            }
+            
+            await bot.sendMessage(msg.chat.id, errorMessage);
         }
     },
 
@@ -742,7 +760,7 @@ const commands = {
             // Log the kick
             await queries.logInfraction(targetUser.id, 'KICK', reason, 'KICK', null, msg.from.id);
             
-            const kickMsg = `👢 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} به مدت ${duration} دقیقه بندازید.\nدلیل: ${reason}`;
+            const kickMsg = `👢 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} از گروه اخراج شد.\nدلیل: ${reason}`;
             await bot.sendMessage(msg.chat.id, kickMsg);
         } catch (error) {
             logger.error('Error kicking user:', {
