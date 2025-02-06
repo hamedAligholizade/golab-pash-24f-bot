@@ -973,6 +973,105 @@ const muteUser = async (userId, chatId, duration, reason, mutedBy) => {
     }
 };
 
+// Poll Management
+const savePoll = async (messageId, chatId, question, options, createdBy) => {
+    try {
+        const query = `
+            INSERT INTO polls (message_id, chat_id, question, options, created_by)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [messageId, chatId, question, options, createdBy]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error saving poll:', {
+            error: error.message,
+            messageId,
+            chatId
+        });
+        throw error;
+    }
+};
+
+const getPoll = async (pollId) => {
+    try {
+        const query = 'SELECT * FROM polls WHERE poll_id = $1';
+        const result = await pool.query(query, [pollId]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error getting poll:', {
+            error: error.message,
+            pollId
+        });
+        throw error;
+    }
+};
+
+const updatePollVote = async (pollId, userId, optionIndex) => {
+    try {
+        const query = `
+            INSERT INTO poll_votes (poll_id, user_id, option_index)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (poll_id, user_id) 
+            DO UPDATE SET
+                option_index = EXCLUDED.option_index,
+                voted_at = CURRENT_TIMESTAMP
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [pollId, userId, optionIndex]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error updating poll vote:', {
+            error: error.message,
+            pollId,
+            userId
+        });
+        throw error;
+    }
+};
+
+const getPollResults = async (pollId) => {
+    try {
+        const query = `
+            SELECT 
+                p.options[pv.option_index + 1] as option,
+                COUNT(*) as votes
+            FROM polls p
+            LEFT JOIN poll_votes pv ON p.poll_id = pv.poll_id
+            WHERE p.poll_id = $1
+            GROUP BY p.poll_id, p.options, pv.option_index
+            ORDER BY pv.option_index;
+        `;
+        const result = await pool.query(query, [pollId]);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting poll results:', {
+            error: error.message,
+            pollId
+        });
+        throw error;
+    }
+};
+
+const closePoll = async (messageId) => {
+    try {
+        const query = `
+            UPDATE polls
+            SET closed_at = CURRENT_TIMESTAMP
+            WHERE message_id = $1
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [messageId]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error closing poll:', {
+            error: error.message,
+            messageId
+        });
+        throw error;
+    }
+};
+
 module.exports = {
     // User Management
     saveUser,
@@ -1020,5 +1119,11 @@ module.exports = {
     getExpiredBans,
     getExpiredMutes,
     unmuteMember,
-    muteUser
+    muteUser,
+    // Poll Management
+    savePoll,
+    getPoll,
+    updatePollVote,
+    getPollResults,
+    closePoll
 }; 

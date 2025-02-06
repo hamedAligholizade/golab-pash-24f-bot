@@ -439,20 +439,45 @@ const commands = {
             return;
         }
 
-        const question = lines[1];
-        const options = lines.slice(2).filter(line => line.trim());
-
-        if (options.length < 2 || options.length > 10) {
-            await bot.sendMessage(msg.chat.id, '⚠️ نظرسنجی باید بین 2 تا 10 گزینه داشته باشد.');
-            return;
-        }
-
         try {
-            const pollMessage = await createPoll(bot, msg.chat.id, question, options);
-            logger.info(`نظرسنجی توسط ${msg.from.username || msg.from.id} در گروه ${msg.chat.id} ایجاد شد`, { messageId: pollMessage.message_id });
+            const question = lines[1].trim();
+            const options = lines.slice(2).map(line => line.trim()).filter(line => line.length > 0);
+
+            if (options.length < 2 || options.length > 10) {
+                await bot.sendMessage(msg.chat.id, '⚠️ نظرسنجی باید بین 2 تا 10 گزینه داشته باشد.');
+                return;
+            }
+
+            // Create the poll
+            const pollMessage = await bot.sendPoll(msg.chat.id, question, options, {
+                is_anonymous: false,
+                allows_multiple_answers: false,
+                type: 'regular'
+            });
+
+            // Save poll to database
+            await queries.savePoll(
+                pollMessage.message_id,
+                msg.chat.id,
+                question,
+                options,
+                msg.from.id
+            );
+
+            logger.info('Poll created successfully', {
+                messageId: pollMessage.message_id,
+                chatId: msg.chat.id,
+                createdBy: msg.from.id
+            });
         } catch (error) {
-            logger.error('Error creating poll:', error);
-            await bot.sendMessage(msg.chat.id, '❌ خطا در ایجاد نظرسنجی. لطفاً دوباره تلاش کنید.');
+            logger.error('Error creating poll:', {
+                error: error.message,
+                stack: error.stack,
+                command: msg.text,
+                chatId: msg.chat.id,
+                fromUser: msg.from.id
+            });
+            await bot.sendMessage(msg.chat.id, 'خطا در ایجاد نظرسنجی. لطفاً دوباره تلاش کنید.');
         }
     },
 
