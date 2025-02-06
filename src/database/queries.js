@@ -131,6 +131,16 @@ const logInfraction = async (userId, type, description, actionTaken, duration, e
     return pool.query(query, [userId, type, description, actionTaken, duration, enforcedBy]);
 };
 
+const getUserInfractions = async (userId) => {
+    const query = `
+        SELECT * FROM infractions
+        WHERE user_id = $1
+        ORDER BY created_at DESC;
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows;
+};
+
 // Group Settings
 const getGroupSettings = async (chatId) => {
     const query = `
@@ -358,6 +368,7 @@ module.exports = {
     deleteMessage,
     // Infractions
     logInfraction,
+    getUserInfractions,
     // Group Settings
     getGroupSettings,
     updateGroupSettings,

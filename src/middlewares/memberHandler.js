@@ -97,6 +97,14 @@ async function handleMemberRestricted(bot, msg) {
 
         // Handle different types of restrictions
         if (!member.can_send_messages) {
+            // Save user to database first
+            await queries.saveUser(
+                member.id,
+                member.username,
+                member.first_name,
+                member.last_name
+            );
+
             // Member was muted
             await queries.logInfraction(
                 member.id,

@@ -175,6 +175,14 @@ async function handleSpam(bot, msg, settings) {
         // Delete spam message
         await bot.deleteMessage(chatId, msg.message_id);
 
+        // Save user to database first
+        await queries.saveUser(
+            msg.from.id,
+            msg.from.username,
+            msg.from.first_name,
+            msg.from.last_name
+        );
+
         // Log the infraction
         await queries.logInfraction(
             userId,
@@ -218,6 +226,14 @@ async function handleBannedContent(bot, msg, violatedContent, settings) {
     try {
         // Delete message with banned content
         await bot.deleteMessage(chatId, msg.message_id);
+
+        // Save user to database first
+        await queries.saveUser(
+            msg.from.id,
+            msg.from.username,
+            msg.from.first_name,
+            msg.from.last_name
+        );
 
         // Log the infraction
         await queries.logInfraction(

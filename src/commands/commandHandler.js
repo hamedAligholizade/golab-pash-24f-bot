@@ -167,6 +167,14 @@ Commands Used: ${userStats.total_commands}
                 return;
             }
 
+            // Save user to database first
+            await queries.saveUser(
+                targetUser.id,
+                targetUser.username,
+                targetUser.first_name,
+                targetUser.last_name
+            );
+
             // Ban the user
             await queries.banUser(targetUser.id, reason, duration, msg.from.id);
             await bot.banChatMember(msg.chat.id, targetUser.id, {
@@ -512,6 +520,14 @@ To change settings, use:
                 await bot.sendMessage(msg.chat.id, '⚠️ You cannot mute administrators or moderators.');
                 return;
             }
+
+            // Save user to database first
+            await queries.saveUser(
+                targetUser.id,
+                targetUser.username,
+                targetUser.first_name,
+                targetUser.last_name
+            );
 
             // Mute the user
             await bot.restrictChatMember(msg.chat.id, targetUser.id, {
