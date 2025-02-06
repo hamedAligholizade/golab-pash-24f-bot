@@ -34,14 +34,19 @@ Event Commands:
 /event_leave <event_id> - Leave an event
 
 Admin Commands (requires permissions):
-!ban <user> <duration> <reason> - Ban a user
-!unban <user> - Unban a user
-!mute <user> <duration> - Mute a user
-!unmute <user> - Unmute a user
-!warn <user> <reason> - Warn a user
-!kick <user> - Kick a user
-!pin - Pin a message
-!unpin - Unpin a message
+!ban - Reply: !ban <duration> [reason]
+      Direct: !ban <@username> <duration> [reason]
+!unban <@username> - Unban a user
+!mute - Reply: !mute <duration> [reason]
+       Direct: !mute <@username> <duration> [reason]
+!unmute - Reply: !unmute
+         Direct: !unmute <@username>
+!warn - Reply: !warn [reason]
+       Direct: !warn <@username> [reason]
+!kick - Reply: !kick [reason]
+       Direct: !kick <@username> [reason]
+!pin - Reply to a message with !pin
+!unpin - Reply to a message with !unpin, or just !unpin to unpin last message
 !settings - Manage group settings
 !poll - Create a poll
 !announce - Make an announcement
@@ -122,14 +127,23 @@ Commands Used: ${userStats.total_commands}
         }
 
         const args = msg.text.split(' ');
-        if (args.length < 3) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !ban <user> <duration> <reason>\nDuration in minutes. You can specify user by username (@username) or by replying to their message.');
-            return;
-        }
-
         let targetUser;
-        const duration = parseInt(args[2]);
-        const reason = args.slice(3).join(' ');
+        let duration;
+        let reason;
+
+        // Check if command is a reply to a message
+        if (msg.reply_to_message) {
+            targetUser = msg.reply_to_message.from;
+            duration = parseInt(args[1]);
+            reason = args.slice(2).join(' ') || 'No reason provided';
+        } else {
+            if (args.length < 3) {
+                await bot.sendMessage(msg.chat.id, 'Usage:\nReply to message: !ban <duration> [reason]\nOr: !ban <@username> <duration> [reason]\nDuration in minutes.');
+                return;
+            }
+            duration = parseInt(args[2]);
+            reason = args.slice(3).join(' ') || 'No reason provided';
+        }
 
         if (isNaN(duration) || duration <= 0) {
             await bot.sendMessage(msg.chat.id, 'Please provide a valid duration in minutes.');
@@ -137,10 +151,7 @@ Commands Used: ${userStats.total_commands}
         }
 
         try {
-            // Check if command is a reply to a message
-            if (msg.reply_to_message) {
-                targetUser = msg.reply_to_message.from;
-            } else {
+            if (!msg.reply_to_message) {
                 // Get user by username or ID
                 const userIdentifier = args[1].replace('@', '');
                 try {
@@ -251,33 +262,25 @@ Commands Used: ${userStats.total_commands}
         }
 
         const args = msg.text.split(' ');
-        if (args.length < 2) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !warn <@username or user_id> <reason>\nExample: !warn @user spamming\nOr reply to a message with: !warn reason');
-            return;
-        }
-
         let targetUser;
         let reason;
 
+        // Check if command is a reply to a message
+        if (msg.reply_to_message) {
+            targetUser = msg.reply_to_message.from;
+            reason = args.slice(1).join(' ') || 'No reason provided';
+        } else {
+            if (args.length < 2) {
+                await bot.sendMessage(msg.chat.id, 'Usage:\nReply to message: !warn [reason]\nOr: !warn <@username> [reason]');
+                return;
+            }
+            reason = args.slice(2).join(' ') || 'No reason provided';
+        }
+
         try {
-            // Check if command is a reply to a message
-            if (msg.reply_to_message) {
-                logger.debug('Getting user from reply message:', {
-                    replyMessage: msg.reply_to_message.message_id,
-                    fromUser: msg.reply_to_message.from
-                });
-                targetUser = msg.reply_to_message.from;
-                reason = args.slice(1).join(' ');
-            } else {
+            if (!msg.reply_to_message) {
                 // Get user by username or ID
                 const userIdentifier = args[1].startsWith('@') ? args[1].substring(1) : args[1];
-                reason = args.slice(2).join(' ');
-
-                logger.debug('Looking up user:', {
-                    userIdentifier,
-                    chatId: msg.chat.id
-                });
-
                 try {
                     // Try to parse as user ID first
                     const userId = parseInt(userIdentifier);
@@ -436,14 +439,23 @@ To change settings, use:
         }
 
         const args = msg.text.split(' ');
-        if (args.length < 3) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !mute <user> <duration> [reason]\nDuration in minutes. You can specify user by username (@username) or by replying to their message.');
-            return;
-        }
-
         let targetUser;
-        const duration = parseInt(args[2]);
-        const reason = args.length > 3 ? args.slice(3).join(' ') : 'No reason provided';
+        let duration;
+        let reason;
+
+        // Check if command is a reply to a message
+        if (msg.reply_to_message) {
+            targetUser = msg.reply_to_message.from;
+            duration = parseInt(args[1]);
+            reason = args.slice(2).join(' ') || 'No reason provided';
+        } else {
+            if (args.length < 3) {
+                await bot.sendMessage(msg.chat.id, 'Usage:\nReply to message: !mute <duration> [reason]\nOr: !mute <@username> <duration> [reason]\nDuration in minutes.');
+                return;
+            }
+            duration = parseInt(args[2]);
+            reason = args.slice(3).join(' ') || 'No reason provided';
+        }
 
         if (isNaN(duration) || duration <= 0) {
             await bot.sendMessage(msg.chat.id, 'Please provide a valid duration in minutes.');
@@ -451,21 +463,9 @@ To change settings, use:
         }
 
         try {
-            // Check if command is a reply to a message
-            if (msg.reply_to_message) {
-                logger.debug('Getting user from reply message:', {
-                    replyMessage: msg.reply_to_message.message_id,
-                    fromUser: msg.reply_to_message.from
-                });
-                targetUser = msg.reply_to_message.from;
-            } else {
+            if (!msg.reply_to_message) {
                 // Get user by username or ID
                 const userIdentifier = args[1].startsWith('@') ? args[1].substring(1) : args[1];
-                logger.debug('Looking up user:', {
-                    userIdentifier,
-                    chatId: msg.chat.id
-                });
-
                 try {
                     // Try to parse as user ID first
                     const userId = parseInt(userIdentifier);
@@ -609,6 +609,163 @@ To change settings, use:
                     ? error.message
                     : 'Failed to unmute user. Please check the username/ID and try again.'
             );
+        }
+    },
+
+    '!kick': async (bot, msg) => {
+        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
+            await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
+            return;
+        }
+
+        const args = msg.text.split(' ');
+        let targetUser;
+        let reason;
+
+        // Check if command is a reply to a message
+        if (msg.reply_to_message) {
+            targetUser = msg.reply_to_message.from;
+            reason = args.slice(1).join(' ') || 'No reason provided';
+        } else {
+            if (args.length < 2) {
+                await bot.sendMessage(msg.chat.id, 'Usage:\nReply to message: !kick [reason]\nOr: !kick <@username> [reason]');
+                return;
+            }
+            reason = args.slice(2).join(' ') || 'No reason provided';
+        }
+
+        try {
+            if (!msg.reply_to_message) {
+                // Get user by username or ID
+                const userIdentifier = args[1].startsWith('@') ? args[1].substring(1) : args[1];
+                try {
+                    // Try to parse as user ID first
+                    const userId = parseInt(userIdentifier);
+                    if (!isNaN(userId)) {
+                        logger.debug('Looking up user by ID:', { userId });
+                        const chatMember = await bot.getChatMember(msg.chat.id, userId);
+                        targetUser = chatMember.user;
+                    } else {
+                        // If not a number, treat as username
+                        logger.debug('Looking up user by username:', { username: userIdentifier });
+                        
+                        try {
+                            // Try direct lookup with @ symbol first
+                            const chatMember = await bot.getChatMember(msg.chat.id, `@${userIdentifier}`);
+                            targetUser = chatMember.user;
+                            logger.debug('Found user by direct lookup:', { user: targetUser });
+                        } catch (directLookupError) {
+                            logger.error('Direct lookup failed:', directLookupError);
+                            try {
+                                // Try without @ symbol as last resort
+                                const chatMember = await bot.getChatMember(msg.chat.id, userIdentifier);
+                                targetUser = chatMember.user;
+                                logger.debug('Found user by username without @:', { user: targetUser });
+                            } catch (error) {
+                                logger.error('All lookup attempts failed:', {
+                                    error: error.message,
+                                    userIdentifier,
+                                    chatId: msg.chat.id
+                                });
+                                throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username or ID is correct and the user is in the chat.`);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    logger.error('Error getting chat member:', {
+                        error: error.message,
+                        userIdentifier,
+                        chatId: msg.chat.id
+                    });
+                    throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username or ID is correct and the user is in the chat.`);
+                }
+            }
+
+            if (!targetUser) {
+                throw new Error('Could not identify the target user. Please use a valid @username or user ID, or reply to the user\'s message.');
+            }
+
+            // Don't allow kicking admins/moderators
+            const isTargetAdmin = await isAdmin(targetUser.id, msg.chat.id, bot);
+            const isTargetMod = await isModerator(targetUser.id, msg.chat.id, bot);
+            if (isTargetAdmin || isTargetMod) {
+                await bot.sendMessage(msg.chat.id, '⚠️ You cannot kick administrators or moderators.');
+                return;
+            }
+
+            // Save user to database first
+            await queries.saveUser(
+                targetUser.id,
+                targetUser.username,
+                targetUser.first_name,
+                targetUser.last_name
+            );
+
+            // Kick the user
+            await bot.banChatMember(msg.chat.id, targetUser.id);
+            await bot.unbanChatMember(msg.chat.id, targetUser.id); // Immediately unban to allow them to rejoin
+
+            // Log the kick
+            await queries.logInfraction(targetUser.id, 'KICK', reason, 'KICK', null, msg.from.id);
+            
+            const kickMsg = `👢 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} has been kicked.\nReason: ${reason}`;
+            await bot.sendMessage(msg.chat.id, kickMsg);
+        } catch (error) {
+            logger.error('Error kicking user:', {
+                error: error.message,
+                stack: error.stack,
+                command: msg.text,
+                chatId: msg.chat.id,
+                fromUser: msg.from.id
+            });
+            await bot.sendMessage(msg.chat.id, error.message);
+        }
+    },
+
+    '!pin': async (bot, msg) => {
+        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
+            await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
+            return;
+        }
+
+        if (!msg.reply_to_message) {
+            await bot.sendMessage(msg.chat.id, 'Usage: Reply to a message with !pin to pin it.');
+            return;
+        }
+
+        try {
+            await bot.pinChatMessage(msg.chat.id, msg.reply_to_message.message_id);
+            await bot.sendMessage(msg.chat.id, '📌 Message pinned successfully.');
+        } catch (error) {
+            logger.error('Error pinning message:', error);
+            await bot.sendMessage(msg.chat.id, 'Failed to pin message. Please try again.');
+        }
+    },
+
+    '!unpin': async (bot, msg) => {
+        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
+            await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
+            return;
+        }
+
+        if (!msg.reply_to_message) {
+            // If no message is replied to, unpin the last pinned message
+            try {
+                await bot.unpinChatMessage(msg.chat.id);
+                await bot.sendMessage(msg.chat.id, '📌 Last pinned message has been unpinned.');
+            } catch (error) {
+                logger.error('Error unpinning last message:', error);
+                await bot.sendMessage(msg.chat.id, 'Failed to unpin message. Please try again.');
+            }
+            return;
+        }
+
+        try {
+            await bot.unpinChatMessage(msg.chat.id, msg.reply_to_message.message_id);
+            await bot.sendMessage(msg.chat.id, '📌 Message unpinned successfully.');
+        } catch (error) {
+            logger.error('Error unpinning message:', error);
+            await bot.sendMessage(msg.chat.id, 'Failed to unpin message. Please try again.');
         }
     }
 };
