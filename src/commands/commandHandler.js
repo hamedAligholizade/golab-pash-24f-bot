@@ -237,7 +237,7 @@ Commands Used: ${userStats.total_commands}
     },
 
     '!warn': async (bot, msg) => {
-        if (!await isModerator(msg.from.id, msg.chat.id)) {
+        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
@@ -258,21 +258,24 @@ Commands Used: ${userStats.total_commands}
                 reason = args.slice(1).join(' ');
             } else {
                 // Get user by username or ID
-                const userIdentifier = args[1].startsWith('@') ? args[1].substring(1) : args[1];
+                const userIdentifier = args[1].replace('@', '');
                 reason = args.slice(2).join(' ');
 
                 try {
                     // Try to parse as user ID first
                     const userId = parseInt(userIdentifier);
                     if (!isNaN(userId)) {
-                        logger.debug(`Attempting to get chat member by ID: ${userId}`);
                         const chatMember = await bot.getChatMember(msg.chat.id, userId);
                         targetUser = chatMember.user;
                     } else {
                         // If not a number, treat as username
-                        logger.debug(`Attempting to get chat member by username: ${userIdentifier}`);
-                        const chatMember = await bot.getChatMember(msg.chat.id, `@${userIdentifier}`);
-                        targetUser = chatMember.user;
+                        // Get chat members and find by username
+                        const chatMembers = await bot.getChatAdministrators(msg.chat.id); // This gets all members in supergroups
+                        const member = chatMembers.find(m => m.user.username?.toLowerCase() === userIdentifier.toLowerCase());
+                        if (!member) {
+                            throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
+                        }
+                        targetUser = member.user;
                     }
                 } catch (error) {
                     logger.error('Error getting chat member:', {

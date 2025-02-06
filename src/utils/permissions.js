@@ -6,9 +6,10 @@ const { logger } = require('./logger');
  * Check if a user is an admin
  * @param {number} userId User ID to check
  * @param {number} chatId Chat ID to check in
+ * @param {Object} bot Bot instance
  * @returns {Promise<boolean>} Whether the user is an admin
  */
-async function isAdmin(userId, chatId) {
+async function isAdmin(userId, chatId, bot) {
     try {
         // Check if user is the bot admin
         if (userId.toString() === config.adminUserId) {
@@ -22,8 +23,8 @@ async function isAdmin(userId, chatId) {
         }
 
         // Check Telegram chat admin status
-        const chatMember = await bot.getChatMember(chatId, userId);
-        return ['creator', 'administrator'].includes(chatMember.status);
+        const member = await bot.getChatMember(chatId, userId);
+        return ['creator', 'administrator'].includes(member.status);
     } catch (error) {
         logger.error('Error checking admin status:', error);
         return false;
@@ -34,12 +35,13 @@ async function isAdmin(userId, chatId) {
  * Check if a user is a moderator or higher
  * @param {number} userId User ID to check
  * @param {number} chatId Chat ID to check in
+ * @param {Object} bot Bot instance
  * @returns {Promise<boolean>} Whether the user is a moderator or higher
  */
-async function isModerator(userId, chatId) {
+async function isModerator(userId, chatId, bot) {
     try {
         // Admins are also moderators
-        if (await isAdmin(userId, chatId)) {
+        if (await isAdmin(userId, chatId, bot)) {
             return true;
         }
 
