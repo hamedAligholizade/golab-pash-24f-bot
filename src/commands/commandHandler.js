@@ -325,6 +325,14 @@ Commands Used: ${userStats.total_commands}
                 return;
             }
 
+            // Save user to database first
+            await queries.saveUser(
+                targetUser.id,
+                targetUser.username,
+                targetUser.first_name,
+                targetUser.last_name
+            );
+
             // Log the warning
             await queries.logInfraction(targetUser.id, 'WARN', reason, 'WARN', null, msg.from.id);
             
