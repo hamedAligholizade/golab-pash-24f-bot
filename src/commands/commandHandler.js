@@ -33,7 +33,7 @@ Event Commands:
 /event_join <event_id> - Join an event
 /event_leave <event_id> - Leave an event
 
-Admin Commands (requires permissions):
+Admin Commands (requires permissions, supergroups only):
 !ban - Reply: !ban <duration> [reason]
       Direct: !ban <@username> <duration> [reason]
 !unban <@username> - Unban a user
@@ -45,10 +45,10 @@ Admin Commands (requires permissions):
        Direct: !warn <@username> [reason]
 !kick - Reply: !kick [reason]
        Direct: !kick <@username> [reason]
-!pin - Reply to a message with !pin
-!unpin - Reply to a message with !unpin, or just !unpin to unpin last message
+!pin - Reply to a message with !pin (supergroups only)
+!unpin - Reply to a message with !unpin, or just !unpin to unpin last message (supergroups only)
 !settings - Manage group settings
-!poll - Create a poll
+!poll - Create a poll (write question and options on new lines)
 !announce - Make an announcement
 !stats_all - View group statistics
 `;
@@ -382,25 +382,46 @@ Commands Used: ${userStats.total_commands}
     },
 
     '!poll': async (bot, msg) => {
-        if (!await isModerator(msg.from.id, msg.chat.id, bot)) {
+        if (!await isAdmin(msg.from.id, msg.chat.id, bot)) {
             await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
             return;
         }
 
-        const args = msg.text.split('\n');
-        if (args.length < 3) {
-            await bot.sendMessage(msg.chat.id, 'Usage: !poll\nQuestion\nOption 1\nOption 2\n...');
+        const text = msg.text.trim();
+        const lines = text.split('\n');
+
+        if (lines.length < 3) {
+            const usage = `Usage: !poll
+<question>
+<option 1>
+<option 2>
+[option 3]
+...
+
+Example:
+!poll
+What's your favorite color?
+Red
+Blue
+Green`;
+            await bot.sendMessage(msg.chat.id, usage);
             return;
         }
 
-        const question = args[1];
-        const options = args.slice(2);
+        const question = lines[1];
+        const options = lines.slice(2).filter(line => line.trim());
+
+        if (options.length < 2 || options.length > 10) {
+            await bot.sendMessage(msg.chat.id, '⚠️ Poll must have between 2 and 10 options.');
+            return;
+        }
 
         try {
-            await createPoll(bot, msg.chat.id, question, options);
+            const poll = await createPoll(bot, msg.chat.id, question, options);
+            logger.info(`Poll created by ${msg.from.username || msg.from.id} in chat ${msg.chat.id}`, { pollId: poll.id });
         } catch (error) {
             logger.error('Error creating poll:', error);
-            await bot.sendMessage(msg.chat.id, 'Failed to create poll. Please try again.');
+            await bot.sendMessage(msg.chat.id, '❌ Failed to create poll. Please try again.');
         }
     },
 
@@ -728,6 +749,13 @@ To change settings, use:
             return;
         }
 
+        // Check if this is a supergroup
+        const chat = await bot.getChat(msg.chat.id);
+        if (chat.type !== 'supergroup') {
+            await bot.sendMessage(msg.chat.id, '⚠️ This command can only be used in supergroups.');
+            return;
+        }
+
         if (!msg.reply_to_message) {
             await bot.sendMessage(msg.chat.id, 'Usage: Reply to a message with !pin to pin it.');
             return;
@@ -748,24 +776,70 @@ To change settings, use:
             return;
         }
 
-        if (!msg.reply_to_message) {
-            // If no message is replied to, unpin the last pinned message
-            try {
-                await bot.unpinChatMessage(msg.chat.id);
-                await bot.sendMessage(msg.chat.id, '📌 Last pinned message has been unpinned.');
-            } catch (error) {
-                logger.error('Error unpinning last message:', error);
-                await bot.sendMessage(msg.chat.id, 'Failed to unpin message. Please try again.');
-            }
+        // Check if this is a supergroup
+        const chat = await bot.getChat(msg.chat.id);
+        if (chat.type !== 'supergroup') {
+            await bot.sendMessage(msg.chat.id, '⚠️ This command can only be used in supergroups.');
             return;
         }
 
         try {
-            await bot.unpinChatMessage(msg.chat.id, msg.reply_to_message.message_id);
-            await bot.sendMessage(msg.chat.id, '📌 Message unpinned successfully.');
+            if (!msg.reply_to_message) {
+                // If no message is replied to, unpin the last pinned message
+                await bot.unpinChatMessage(msg.chat.id);
+                await bot.sendMessage(msg.chat.id, '📌 Last pinned message has been unpinned.');
+            } else {
+                await bot.unpinChatMessage(msg.chat.id, {
+                    message_id: msg.reply_to_message.message_id
+                });
+                await bot.sendMessage(msg.chat.id, '📌 Message unpinned successfully.');
+            }
         } catch (error) {
             logger.error('Error unpinning message:', error);
             await bot.sendMessage(msg.chat.id, 'Failed to unpin message. Please try again.');
+        }
+    },
+
+    '!announce': async (bot, msg) => {
+        if (!await isAdmin(msg.from.id, msg.chat.id, bot)) {
+            await bot.sendMessage(msg.chat.id, 'You do not have permission to use this command.');
+            return;
+        }
+
+        const announcement = msg.text.split('\n').slice(1).join('\n');
+        if (!announcement) {
+            await bot.sendMessage(msg.chat.id, 'Usage: !announce\n<your announcement message>\n\nWrite your announcement in a new line after the command.');
+            return;
+        }
+
+        try {
+            // Format the announcement message
+            const formattedAnnouncement = `📢 *Announcement*\n\n${announcement}\n\n_By: ${msg.from.username ? '@' + msg.from.username : msg.from.first_name}_`;
+
+            // Send the announcement
+            const sentMsg = await bot.sendMessage(msg.chat.id, formattedAnnouncement, {
+                parse_mode: 'Markdown',
+                disable_web_page_preview: true
+            });
+
+            // Pin the announcement if in a supergroup
+            const chat = await bot.getChat(msg.chat.id);
+            if (chat.type === 'supergroup') {
+                try {
+                    await bot.pinChatMessage(msg.chat.id, sentMsg.message_id);
+                } catch (pinError) {
+                    logger.error('Failed to pin announcement:', pinError);
+                    // Don't throw here as the announcement was still sent
+                }
+            }
+        } catch (error) {
+            logger.error('Error sending announcement:', {
+                error: error.message,
+                stack: error.stack,
+                chatId: msg.chat.id,
+                fromUser: msg.from.id
+            });
+            await bot.sendMessage(msg.chat.id, 'Failed to send announcement. Please try again.');
         }
     }
 };

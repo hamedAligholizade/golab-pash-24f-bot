@@ -80,10 +80,18 @@ const unbanUser = async (userId) => {
 
 const getBannedUsers = async () => {
     const query = `
-        SELECT * FROM users 
-        WHERE is_banned = true 
-        AND ban_until IS NOT NULL 
-        AND ban_until <= NOW()
+        SELECT u.*, i.created_at as ban_start, i.duration as ban_duration
+        FROM users u
+        JOIN infractions i ON u.user_id = i.user_id
+        WHERE u.is_banned = true 
+        AND i.type = 'BAN'
+        AND i.created_at + (i.duration * interval '1 second') <= NOW()
+        AND NOT EXISTS (
+            SELECT 1 FROM infractions i2
+            WHERE i2.user_id = i.user_id
+            AND i2.type = 'BAN'
+            AND i2.created_at > i.created_at
+        );
     `;
     const result = await pool.query(query);
     return result.rows;
@@ -358,6 +366,67 @@ const updateFeedbackStatus = async (feedbackId, status, reviewedBy) => {
     return pool.query(query, [feedbackId, status, reviewedBy]);
 };
 
+const getExpiredRestrictions = async () => {
+    const query = `
+        SELECT DISTINCT i.user_id, i.type, i.duration, i.created_at, u.username, u.first_name, u.last_name,
+               m.chat_id
+        FROM infractions i
+        JOIN users u ON i.user_id = u.user_id
+        JOIN message_logs m ON i.user_id = m.user_id
+        WHERE i.type IN ('BAN', 'MUTE')
+        AND i.created_at + (i.duration * interval '1 second') <= NOW()
+        AND NOT EXISTS (
+            SELECT 1 FROM infractions i2
+            WHERE i2.user_id = i.user_id
+            AND i2.type = i.type
+            AND i2.created_at > i.created_at
+        )
+        ORDER BY i.created_at DESC;
+    `;
+    const result = await pool.query(query);
+    return result.rows;
+};
+
+const removeRestriction = async (userId, type) => {
+    let query;
+    if (type === 'BAN') {
+        query = `
+            UPDATE users 
+            SET is_banned = false, 
+                ban_reason = null,
+                ban_until = null
+            WHERE user_id = $1
+            RETURNING *;
+        `;
+    } else if (type === 'MUTE') {
+        // For mute, we just log that it's been removed since the actual unmute happens in Telegram
+        query = `
+            INSERT INTO infractions (user_id, type, description, action_taken, duration, enforced_by)
+            VALUES ($1, $2, 'Restriction expired automatically', 'UNMUTE', 0, NULL)
+            RETURNING *;
+        `;
+    }
+    return pool.query(query, [userId]);
+};
+
+const getUserRestrictedChats = async (userId, type) => {
+    const query = `
+        SELECT DISTINCT chat_id 
+        FROM message_logs 
+        WHERE user_id = $1
+        AND chat_id IN (
+            SELECT DISTINCT m2.chat_id
+            FROM message_logs m2
+            JOIN infractions i ON i.user_id = m2.user_id
+            WHERE i.user_id = $1 
+            AND i.type = $2
+            AND i.created_at >= NOW() - INTERVAL '30 days'
+        )
+    `;
+    const result = await pool.query(query, [userId, type]);
+    return result.rows;
+};
+
 module.exports = {
     // User Management
     saveUser,
@@ -398,5 +467,8 @@ module.exports = {
     updateEventParticipation,
     // Feedback
     submitFeedback,
-    updateFeedbackStatus
+    updateFeedbackStatus,
+    getExpiredRestrictions,
+    removeRestriction,
+    getUserRestrictedChats
 }; 

@@ -118,47 +118,70 @@ async function startBot() {
             logger.error('General bot error:', error);
         });
 
-        // Check for expired bans every minute
-        async function checkExpiredBans() {
+        // Check for expired restrictions every minute
+        async function checkExpiredRestrictions() {
             try {
-                // Get all banned users whose ban has expired
-                const expiredBans = await queries.getBannedUsers();
+                // Get all users with expired restrictions (bans, mutes, etc.)
+                const expiredRestrictions = await queries.getExpiredRestrictions();
                 
-                for (const user of expiredBans) {
+                for (const restriction of expiredRestrictions) {
                     try {
-                        // Get all chats where the user was banned
-                        const bannedChats = await queries.getUserBannedChats(user.user_id);
+                        // Get all chats where the user was restricted
+                        const restrictedChats = await queries.getUserRestrictedChats(restriction.user_id, restriction.type);
                         
-                        // Unban from each chat
-                        for (const chat of bannedChats) {
+                        // Remove restrictions from each chat
+                        for (const chat of restrictedChats) {
                             try {
-                                await bot.unbanChatMember(chat.chat_id, user.user_id);
-                                logger.info(`Automatically unbanned user ${user.user_id} from chat ${chat.chat_id} (ban expired)`);
+                                if (restriction.type === 'BAN') {
+                                    await bot.unbanChatMember(chat.chat_id, restriction.user_id);
+                                    logger.info(`Automatically unbanned user ${restriction.user_id} from chat ${chat.chat_id} (ban expired)`);
+                                } else if (restriction.type === 'MUTE') {
+                                    await bot.restrictChatMember(chat.chat_id, restriction.user_id, {
+                                        can_send_messages: true,
+                                        can_send_media_messages: true,
+                                        can_send_other_messages: true,
+                                        can_add_web_page_previews: true
+                                    });
+                                    logger.info(`Automatically unmuted user ${restriction.user_id} from chat ${chat.chat_id} (mute expired)`);
+                                }
+
+                                // Send notification to the chat
+                                const actionText = restriction.type === 'BAN' ? 'ban' : 'mute';
+                                const userMention = restriction.username ? 
+                                    `@${restriction.username}` : 
+                                    `${restriction.first_name}${restriction.last_name ? ' ' + restriction.last_name : ''}`;
+                                
+                                await bot.sendMessage(
+                                    chat.chat_id,
+                                    `🔄 ${userMention}'s ${actionText} has expired and has been automatically removed.`
+                                );
                             } catch (chatError) {
-                                logger.error('Failed to unban user from chat:', {
+                                logger.error(`Failed to remove ${restriction.type.toLowerCase()} from chat:`, {
                                     error: chatError.message,
-                                    userId: user.user_id,
-                                    chatId: chat.chat_id
+                                    userId: restriction.user_id,
+                                    chatId: chat.chat_id,
+                                    type: restriction.type
                                 });
                             }
                         }
 
-                        // Update user's ban status in database
-                        await queries.unbanUser(user.user_id);
+                        // Update restriction status in database
+                        await queries.removeRestriction(restriction.user_id, restriction.type);
                     } catch (userError) {
-                        logger.error('Error processing expired ban for user:', {
+                        logger.error(`Error processing expired ${restriction.type.toLowerCase()}:`, {
                             error: userError.message,
-                            userId: user.user_id
+                            userId: restriction.user_id,
+                            type: restriction.type
                         });
                     }
                 }
             } catch (error) {
-                logger.error('Error checking expired bans:', error);
+                logger.error('Error checking expired restrictions:', error);
             }
         }
 
-        // Start the expired bans check interval
-        setInterval(checkExpiredBans, 60000); // Run every minute
+        // Start the expired restrictions check interval
+        setInterval(checkExpiredRestrictions, 60000); // Run every minute
 
         logger.info('Bot is running...');
     } catch (error) {
