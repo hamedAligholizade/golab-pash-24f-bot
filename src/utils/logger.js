@@ -82,9 +82,10 @@ function writeLog(level, message, metadata = null) {
 /**
  * Clean sensitive data from objects before logging
  * @param {Object} obj Object to clean
+ * @param {WeakSet} seen WeakSet to track circular references
  * @returns {Object} Cleaned object
  */
-function cleanSensitiveData(obj) {
+function cleanSensitiveData(obj, seen = new WeakSet()) {
     const sensitiveKeys = ['password', 'token', 'secret', 'key', 'auth'];
     
     // Handle non-objects and null
@@ -92,44 +93,37 @@ function cleanSensitiveData(obj) {
         return obj;
     }
 
-    try {
-        // Use JSON methods to handle circular references automatically
-        const stringified = JSON.stringify(obj, (key, value) => {
-            // Handle Error objects
-            if (value instanceof Error) {
-                return {
-                    name: value.name,
-                    message: value.message,
-                    stack: value.stack
-                };
-            }
+    // Handle circular references
+    if (seen.has(obj)) {
+        return '[Circular Reference]';
+    }
+    seen.add(obj);
 
-            // Redact sensitive values
-            if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
-                return '[REDACTED]';
-            }
-
-            return value;
-        });
-
-        return JSON.parse(stringified);
-    } catch (error) {
-        // If JSON.stringify fails (e.g., due to circular references), return a simplified object
-        if (obj instanceof Error) {
-            return {
-                name: obj.name,
-                message: obj.message,
-                stack: obj.stack
-            };
-        }
-
-        // For other objects, return a basic representation
+    // Handle Error objects directly
+    if (obj instanceof Error) {
         return {
-            type: obj.constructor.name,
-            toString: obj.toString(),
-            error: 'Object could not be fully serialized'
+            name: obj.name,
+            message: obj.message,
+            stack: obj.stack
         };
     }
+
+    // Handle Arrays
+    if (Array.isArray(obj)) {
+        return obj.map(item => cleanSensitiveData(item, seen));
+    }
+
+    // Handle regular objects
+    const cleaned = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
+            cleaned[key] = '[REDACTED]';
+        } else {
+            cleaned[key] = cleanSensitiveData(value, seen);
+        }
+    }
+
+    return cleaned;
 }
 
 // Logger interface
