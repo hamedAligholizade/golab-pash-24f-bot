@@ -31,51 +31,68 @@ function scheduleJobs(bot) {
  */
 async function checkTemporaryBans(bot) {
     try {
-        // Get all users with expired temporary bans
-        const bannedUsers = await queries.getBannedUsers();
+        // Get all users with expired restrictions
+        const expiredRestrictions = await queries.getExpiredRestrictions();
         
-        if (!bannedUsers || bannedUsers.length === 0) {
-            return; // No banned users to process
+        if (!expiredRestrictions || expiredRestrictions.length === 0) {
+            return; // No expired restrictions to process
         }
 
-        const now = new Date();
-        logger.info(`Checking ${bannedUsers.length} temporary bans`);
+        logger.info(`Checking ${expiredRestrictions.length} temporary restrictions`);
 
-        for (const user of bannedUsers) {
+        for (const restriction of expiredRestrictions) {
             try {
-                if (user.ban_until && user.ban_until <= now) {
-                    // Unban user in database
-                    await queries.unbanUser(user.user_id);
-                    logger.info(`Unbanned user ${user.user_id} (ban expired)`);
-                    
-                    // Get all chats where the user was banned
-                    const chats = await queries.getUserBannedChats(user.user_id);
-                    
-                    for (const chat of chats) {
-                        try {
-                            await bot.unbanChatMember(chat.chat_id, user.user_id);
-                            await bot.sendMessage(
-                                chat.chat_id,
-                                `🔓 Ban expired for user @${user.username || user.user_id}`
-                            );
-                            logger.info(`Unbanned user ${user.user_id} from chat ${chat.chat_id}`);
-                        } catch (error) {
-                            logger.error(`Failed to unban user ${user.user_id} in chat ${chat.chat_id}:`, {
-                                error: error.message,
-                                stack: error.stack
+                // Get all chats where the user was restricted
+                const restrictedChats = await queries.getUserRestrictedChats(restriction.user_id, restriction.type);
+                
+                // Remove restrictions from each chat
+                for (const chat of restrictedChats) {
+                    try {
+                        if (restriction.type === 'BAN') {
+                            await bot.unbanChatMember(chat.chat_id, restriction.user_id);
+                            logger.info(`Automatically unbanned user ${restriction.user_id} from chat ${chat.chat_id} (ban expired)`);
+                        } else if (restriction.type === 'MUTE') {
+                            await bot.restrictChatMember(chat.chat_id, restriction.user_id, {
+                                can_send_messages: true,
+                                can_send_media_messages: true,
+                                can_send_other_messages: true,
+                                can_add_web_page_previews: true
                             });
+                            logger.info(`Automatically unmuted user ${restriction.user_id} from chat ${chat.chat_id} (mute expired)`);
                         }
+
+                        // Send notification to the chat
+                        const actionText = restriction.type === 'BAN' ? 'مسدودیت' : 'سکوت';
+                        const userMention = restriction.username ? 
+                            `@${restriction.username}` : 
+                            `${restriction.first_name}${restriction.last_name ? ' ' + restriction.last_name : ''}`;
+                        
+                        await bot.sendMessage(
+                            chat.chat_id,
+                            `🔄 ${actionText} ${userMention} به پایان رسید و به صورت خودکار برداشته شد.`
+                        );
+                    } catch (chatError) {
+                        logger.error(`Failed to remove ${restriction.type.toLowerCase()} from chat:`, {
+                            error: chatError.message,
+                            userId: restriction.user_id,
+                            chatId: chat.chat_id,
+                            type: restriction.type
+                        });
                     }
                 }
-            } catch (error) {
-                logger.error(`Failed to process unban for user ${user.user_id}:`, {
-                    error: error.message,
-                    stack: error.stack
+
+                // Update restriction status in database
+                await queries.removeRestriction(restriction.user_id, restriction.type);
+            } catch (userError) {
+                logger.error(`Error processing expired ${restriction.type.toLowerCase()}:`, {
+                    error: userError.message,
+                    userId: restriction.user_id,
+                    type: restriction.type
                 });
             }
         }
     } catch (error) {
-        logger.error('Error checking temporary bans:', {
+        logger.error('Error checking temporary restrictions:', {
             error: error.message,
             stack: error.stack
         });

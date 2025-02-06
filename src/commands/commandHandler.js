@@ -203,6 +203,9 @@ const commands = {
                 // Try sending without the @ mention if that fails
                 await bot.sendMessage(msg.chat.id, `🚫 کاربر به مدت ${duration} دقیقه مسدود شد.\nدلیل: ${reason}`);
             }
+
+            // Log the ban
+            await queries.logInfraction(targetUser.id, 'BAN', reason, 'BAN', `${duration} minutes`, msg.from.id);
         } catch (error) {
             logger.error('Error banning user:', error);
             await bot.sendMessage(
@@ -569,7 +572,7 @@ const commands = {
             });
 
             // Log the mute
-            await queries.logInfraction(targetUser.id, 'MUTE', reason, 'MUTE', duration * 60, msg.from.id);
+            await queries.logInfraction(targetUser.id, 'MUTE', reason, 'MUTE', `${duration} minutes`, msg.from.id);
             
             const muteMsg = `🔇 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} به مدت ${duration} دقیقه سکوت شد.\nدلیل: ${reason}`;
             await bot.sendMessage(msg.chat.id, muteMsg);

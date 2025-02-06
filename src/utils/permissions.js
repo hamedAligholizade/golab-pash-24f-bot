@@ -3,28 +3,20 @@ const queries = require('../database/queries');
 const { logger } = require('./logger');
 
 /**
- * Check if a user is an admin
+ * Check if a user is an admin in a chat
  * @param {number} userId User ID to check
  * @param {number} chatId Chat ID to check in
- * @param {Object} bot Bot instance
+ * @param {TelegramBot} bot Bot instance
  * @returns {Promise<boolean>} Whether the user is an admin
  */
 async function isAdmin(userId, chatId, bot) {
     try {
-        // Check if user is the bot admin
-        if (userId.toString() === config.adminUserId) {
-            return true;
+        if (!bot) {
+            logger.error('Bot instance is undefined in isAdmin check');
+            return false;
         }
-
-        // Check user roles
-        const roles = await queries.getUserRoles(userId);
-        if (roles.some(role => role.role_name === 'Admin')) {
-            return true;
-        }
-
-        // Check Telegram chat admin status
         const member = await bot.getChatMember(chatId, userId);
-        return ['creator', 'administrator'].includes(member.status);
+        return member.status === 'creator' || member.status === 'administrator';
     } catch (error) {
         logger.error('Error checking admin status:', error);
         return false;
@@ -32,22 +24,26 @@ async function isAdmin(userId, chatId, bot) {
 }
 
 /**
- * Check if a user is a moderator or higher
+ * Check if a user is a moderator in a chat
  * @param {number} userId User ID to check
  * @param {number} chatId Chat ID to check in
- * @param {Object} bot Bot instance
- * @returns {Promise<boolean>} Whether the user is a moderator or higher
+ * @param {TelegramBot} bot Bot instance
+ * @returns {Promise<boolean>} Whether the user is a moderator
  */
 async function isModerator(userId, chatId, bot) {
     try {
-        // Admins are also moderators
+        if (!bot) {
+            logger.error('Bot instance is undefined in isModerator check');
+            return false;
+        }
+        // First check if user is an admin
         if (await isAdmin(userId, chatId, bot)) {
             return true;
         }
 
-        // Check user roles
-        const roles = await queries.getUserRoles(userId);
-        return roles.some(role => ['Moderator', 'Admin'].includes(role.role_name));
+        // Then check moderator role
+        const member = await bot.getChatMember(chatId, userId);
+        return member.status === 'moderator';
     } catch (error) {
         logger.error('Error checking moderator status:', error);
         return false;

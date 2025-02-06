@@ -374,7 +374,7 @@ const getExpiredRestrictions = async () => {
         JOIN users u ON i.user_id = u.user_id
         JOIN message_logs m ON i.user_id = m.user_id
         WHERE i.type IN ('BAN', 'MUTE')
-        AND i.created_at + (i.duration || ' seconds')::interval <= NOW()
+        AND i.created_at + i.duration <= NOW()
         AND NOT EXISTS (
             SELECT 1 FROM infractions i2
             WHERE i2.user_id = i.user_id
