@@ -58,6 +58,26 @@ CREATE TABLE IF NOT EXISTS messages (
     PRIMARY KEY (message_id, chat_id)
 );
 
+-- Message logs for analytics
+CREATE TABLE IF NOT EXISTS message_logs (
+    log_id SERIAL PRIMARY KEY,
+    message_id BIGINT,
+    chat_id BIGINT,
+    user_id BIGINT REFERENCES users(user_id),
+    message_type VARCHAR(50),
+    content TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User activity logs
+CREATE TABLE IF NOT EXISTS user_activity (
+    activity_id SERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(user_id),
+    activity_type VARCHAR(50),
+    activity_data JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Infractions (warnings, mutes, bans)
 CREATE TABLE IF NOT EXISTS infractions (
     infraction_id SERIAL PRIMARY KEY,
@@ -122,12 +142,28 @@ CREATE TABLE IF NOT EXISTS feedback (
     status VARCHAR(50) DEFAULT 'PENDING' -- PENDING, REVIEWED, RESOLVED
 );
 
+-- Muted users
+CREATE TABLE IF NOT EXISTS muted_users (
+    mute_id SERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(user_id),
+    chat_id BIGINT,
+    muted_until TIMESTAMP,
+    muted_by BIGINT REFERENCES users(user_id),
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_message_logs_user_id ON message_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_message_logs_chat_id ON message_logs(chat_id);
 CREATE INDEX IF NOT EXISTS idx_infractions_user_id ON infractions(user_id);
 CREATE INDEX IF NOT EXISTS idx_poll_votes_poll_id ON poll_votes(poll_id);
 CREATE INDEX IF NOT EXISTS idx_event_participants_event_id ON event_participants(event_id);
+CREATE INDEX IF NOT EXISTS idx_user_activity_user_id ON user_activity(user_id);
+CREATE INDEX IF NOT EXISTS idx_muted_users_user_id ON muted_users(user_id);
+CREATE INDEX IF NOT EXISTS idx_muted_users_chat_id ON muted_users(chat_id);
 
 -- Add triggers for updating timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
