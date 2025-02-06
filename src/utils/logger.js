@@ -82,21 +82,45 @@ function writeLog(level, message, metadata = null) {
 /**
  * Clean sensitive data from objects before logging
  * @param {Object} obj Object to clean
+ * @param {Set} [seen] Set of already processed objects to handle circular references
  * @returns {Object} Cleaned object
  */
-function cleanSensitiveData(obj) {
+function cleanSensitiveData(obj, seen = new Set()) {
     if (!obj || typeof obj !== 'object') {
         return obj;
     }
 
-    const sensitiveKeys = ['password', 'token', 'secret', 'key', 'auth'];
-    const cleaned = { ...obj };
+    // Handle circular references
+    if (seen.has(obj)) {
+        return '[Circular]';
+    }
+    seen.add(obj);
 
-    for (const key of Object.keys(cleaned)) {
+    const sensitiveKeys = ['password', 'token', 'secret', 'key', 'auth'];
+    
+    // Handle arrays
+    if (Array.isArray(obj)) {
+        return obj.map(item => cleanSensitiveData(item, seen));
+    }
+
+    // Handle Error objects
+    if (obj instanceof Error) {
+        return {
+            name: obj.name,
+            message: obj.message,
+            stack: obj.stack
+        };
+    }
+
+    const cleaned = {};
+    for (const [key, value] of Object.entries(obj)) {
+        // Check if the key contains sensitive information
         if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
             cleaned[key] = '[REDACTED]';
-        } else if (typeof cleaned[key] === 'object') {
-            cleaned[key] = cleanSensitiveData(cleaned[key]);
+        } else if (value && typeof value === 'object') {
+            cleaned[key] = cleanSensitiveData(value, seen);
+        } else {
+            cleaned[key] = value;
         }
     }
 

@@ -2,6 +2,7 @@ const config = require('../config/config');
 const queries = require('../database/queries');
 const { logger } = require('../utils/logger');
 const { isSpam, containsBannedContent } = require('../utils/contentFilter');
+const { isAdmin } = require('../utils/permissions');
 
 async function handleMessage(bot, msg, messageCache) {
     try {
