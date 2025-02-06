@@ -254,31 +254,53 @@ Commands Used: ${userStats.total_commands}
         try {
             // Check if command is a reply to a message
             if (msg.reply_to_message) {
+                logger.debug('Getting user from reply message:', {
+                    replyMessage: msg.reply_to_message.message_id,
+                    fromUser: msg.reply_to_message.from
+                });
                 targetUser = msg.reply_to_message.from;
                 reason = args.slice(1).join(' ');
             } else {
                 // Get user by username or ID
-                const userIdentifier = args[1].replace('@', '');
+                const userIdentifier = args[1].startsWith('@') ? args[1].substring(1) : args[1];
                 reason = args.slice(2).join(' ');
+
+                logger.debug('Looking up user:', {
+                    userIdentifier,
+                    chatId: msg.chat.id
+                });
 
                 try {
                     // Try to parse as user ID first
                     const userId = parseInt(userIdentifier);
                     if (!isNaN(userId)) {
+                        logger.debug('Looking up user by ID:', { userId });
                         const chatMember = await bot.getChatMember(msg.chat.id, userId);
                         targetUser = chatMember.user;
                     } else {
                         // If not a number, treat as username
+                        logger.debug('Looking up user by username:', { username: userIdentifier });
+                        
                         try {
-                            const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                            // Try direct lookup with @ symbol first
+                            const chatMember = await bot.getChatMember(msg.chat.id, `@${userIdentifier}`);
                             targetUser = chatMember.user;
-                        } catch (error) {
-                            // If direct lookup fails, try getting chat members
-                            const chat = await bot.getChat(msg.chat.id);
-                            if (!chat.username) {
-                                throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
+                            logger.debug('Found user by direct lookup:', { user: targetUser });
+                        } catch (directLookupError) {
+                            logger.error('Direct lookup failed:', directLookupError);
+                            try {
+                                // Try without @ symbol as last resort
+                                const chatMember = await bot.getChatMember(msg.chat.id, userIdentifier);
+                                targetUser = chatMember.user;
+                                logger.debug('Found user by username without @:', { user: targetUser });
+                            } catch (error) {
+                                logger.error('All lookup attempts failed:', {
+                                    error: error.message,
+                                    userIdentifier,
+                                    chatId: msg.chat.id
+                                });
+                                throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username or ID is correct and the user is in the chat.`);
                             }
-                            throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
                         }
                     }
                 } catch (error) {
@@ -415,28 +437,50 @@ To change settings, use:
         try {
             // Check if command is a reply to a message
             if (msg.reply_to_message) {
+                logger.debug('Getting user from reply message:', {
+                    replyMessage: msg.reply_to_message.message_id,
+                    fromUser: msg.reply_to_message.from
+                });
                 targetUser = msg.reply_to_message.from;
             } else {
                 // Get user by username or ID
-                const userIdentifier = args[1].replace('@', '');
+                const userIdentifier = args[1].startsWith('@') ? args[1].substring(1) : args[1];
+                logger.debug('Looking up user:', {
+                    userIdentifier,
+                    chatId: msg.chat.id
+                });
+
                 try {
                     // Try to parse as user ID first
                     const userId = parseInt(userIdentifier);
                     if (!isNaN(userId)) {
+                        logger.debug('Looking up user by ID:', { userId });
                         const chatMember = await bot.getChatMember(msg.chat.id, userId);
                         targetUser = chatMember.user;
                     } else {
                         // If not a number, treat as username
+                        logger.debug('Looking up user by username:', { username: userIdentifier });
+                        
                         try {
-                            const chatMember = await bot.getChatMember(msg.chat.id, '@' + userIdentifier);
+                            // Try direct lookup with @ symbol first
+                            const chatMember = await bot.getChatMember(msg.chat.id, `@${userIdentifier}`);
                             targetUser = chatMember.user;
-                        } catch (error) {
-                            // If direct lookup fails, try getting chat members
-                            const chat = await bot.getChat(msg.chat.id);
-                            if (!chat.username) {
-                                throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
+                            logger.debug('Found user by direct lookup:', { user: targetUser });
+                        } catch (directLookupError) {
+                            logger.error('Direct lookup failed:', directLookupError);
+                            try {
+                                // Try without @ symbol as last resort
+                                const chatMember = await bot.getChatMember(msg.chat.id, userIdentifier);
+                                targetUser = chatMember.user;
+                                logger.debug('Found user by username without @:', { user: targetUser });
+                            } catch (error) {
+                                logger.error('All lookup attempts failed:', {
+                                    error: error.message,
+                                    userIdentifier,
+                                    chatId: msg.chat.id
+                                });
+                                throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username or ID is correct and the user is in the chat.`);
                             }
-                            throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username is correct and the user is in the chat.`);
                         }
                     }
                 } catch (error) {
@@ -447,6 +491,10 @@ To change settings, use:
                     });
                     throw new Error(`Could not find user "${args[1]}" in this chat. Make sure the username or ID is correct and the user is in the chat.`);
                 }
+            }
+
+            if (!targetUser) {
+                throw new Error('Could not identify the target user. Please use a valid @username or user ID, or reply to the user\'s message.');
             }
 
             // Don't allow muting admins/moderators
@@ -472,13 +520,14 @@ To change settings, use:
             const muteMsg = `🔇 ${targetUser.username ? '@' + targetUser.username : targetUser.first_name} has been muted for ${duration} minutes.\nReason: ${reason}`;
             await bot.sendMessage(msg.chat.id, muteMsg);
         } catch (error) {
-            logger.error('Error muting user:', error);
-            await bot.sendMessage(
-                msg.chat.id,
-                error.message === 'Could not find user. Make sure the username or ID is correct.'
-                    ? error.message
-                    : 'Failed to mute user. Please check the username/ID and try again.'
-            );
+            logger.error('Error muting user:', {
+                error: error.message,
+                stack: error.stack,
+                command: msg.text,
+                chatId: msg.chat.id,
+                fromUser: msg.from.id
+            });
+            await bot.sendMessage(msg.chat.id, error.message);
         }
     },
 
@@ -550,11 +599,11 @@ async function handleCommand(bot, msg) {
 
         if (handler) {
             try {
-                await handler(bot, msg);
+            await handler(bot, msg);
                 
-                // Log command usage
+            // Log command usage
                 try {
-                    await queries.updateUserActivity(msg.from.id, 'commands_used');
+            await queries.updateUserActivity(msg.from.id, 'commands_used');
                 } catch (activityError) {
                     logger.error('Failed to update command usage activity:', {
                         error: activityError.message,
