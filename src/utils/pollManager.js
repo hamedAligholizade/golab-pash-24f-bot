@@ -35,7 +35,7 @@ async function createPoll(bot, chatId, question, options) {
         });
 
         logger.info(`Poll created in chat ${chatId}`, { pollId: poll.id });
-        return poll;
+        return message;
     } catch (error) {
         logger.error('Error creating poll:', error);
         throw error;

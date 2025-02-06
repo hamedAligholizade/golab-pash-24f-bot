@@ -45,8 +45,8 @@ Admin Commands (requires permissions, supergroups only):
        Direct: !warn <@username> [reason]
 !kick - Reply: !kick [reason]
        Direct: !kick <@username> [reason]
-!pin - Reply to a message with !pin (supergroups only)
-!unpin - Reply to a message with !unpin, or just !unpin to unpin last message (supergroups only)
+!pin - Reply to a message with !pin
+!unpin - Reply to a message with !unpin, or just !unpin to unpin last message
 !settings - Manage group settings
 !poll - Create a poll (write question and options on new lines)
 !announce - Make an announcement
@@ -417,8 +417,8 @@ Green`;
         }
 
         try {
-            const poll = await createPoll(bot, msg.chat.id, question, options);
-            logger.info(`Poll created by ${msg.from.username || msg.from.id} in chat ${msg.chat.id}`, { pollId: poll.id });
+            const pollMessage = await createPoll(bot, msg.chat.id, question, options);
+            logger.info(`Poll created by ${msg.from.username || msg.from.id} in chat ${msg.chat.id}`, { messageId: pollMessage.message_id });
         } catch (error) {
             logger.error('Error creating poll:', error);
             await bot.sendMessage(msg.chat.id, '❌ Failed to create poll. Please try again.');
@@ -749,13 +749,6 @@ To change settings, use:
             return;
         }
 
-        // Check if this is a supergroup
-        const chat = await bot.getChat(msg.chat.id);
-        if (chat.type !== 'supergroup') {
-            await bot.sendMessage(msg.chat.id, '⚠️ This command can only be used in supergroups.');
-            return;
-        }
-
         if (!msg.reply_to_message) {
             await bot.sendMessage(msg.chat.id, 'Usage: Reply to a message with !pin to pin it.');
             return;
@@ -776,27 +769,15 @@ To change settings, use:
             return;
         }
 
-        // Check if this is a supergroup
-        const chat = await bot.getChat(msg.chat.id);
-        if (chat.type !== 'supergroup') {
-            await bot.sendMessage(msg.chat.id, '⚠️ This command can only be used in supergroups.');
-            return;
-        }
-
-        try {
-            if (!msg.reply_to_message) {
-                // If no message is replied to, unpin the last pinned message
-                await bot.unpinChatMessage(msg.chat.id);
-                await bot.sendMessage(msg.chat.id, '📌 Last pinned message has been unpinned.');
-            } else {
-                await bot.unpinChatMessage(msg.chat.id, {
-                    message_id: msg.reply_to_message.message_id
-                });
-                await bot.sendMessage(msg.chat.id, '📌 Message unpinned successfully.');
-            }
-        } catch (error) {
-            logger.error('Error unpinning message:', error);
-            await bot.sendMessage(msg.chat.id, 'Failed to unpin message. Please try again.');
+        if (!msg.reply_to_message) {
+            // If no message is replied to, unpin the last pinned message
+            await bot.unpinChatMessage(msg.chat.id);
+            await bot.sendMessage(msg.chat.id, '📌 Last pinned message has been unpinned.');
+        } else {
+            await bot.unpinChatMessage(msg.chat.id, {
+                message_id: msg.reply_to_message.message_id
+            });
+            await bot.sendMessage(msg.chat.id, '📌 Message unpinned successfully.');
         }
     },
 

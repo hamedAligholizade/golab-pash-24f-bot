@@ -85,7 +85,7 @@ const getBannedUsers = async () => {
         JOIN infractions i ON u.user_id = i.user_id
         WHERE u.is_banned = true 
         AND i.type = 'BAN'
-        AND i.created_at + (i.duration * interval '1 second') <= NOW()
+        AND i.created_at + (i.duration || ' seconds')::interval <= NOW()
         AND NOT EXISTS (
             SELECT 1 FROM infractions i2
             WHERE i2.user_id = i.user_id
