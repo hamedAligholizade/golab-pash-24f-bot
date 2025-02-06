@@ -1,25 +1,36 @@
 const { pool } = require('./init');
+const { logger } = require('../utils/logger');
 
 // User Management
-const saveUser = async (userId, username, firstName, lastName, joinedDate = new Date()) => {
-    const query = `
-        INSERT INTO users (user_id, username, first_name, last_name, joined_date)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (user_id) 
-        DO UPDATE SET 
-            username = EXCLUDED.username,
-            first_name = EXCLUDED.first_name,
-            last_name = EXCLUDED.last_name
-        RETURNING *;
-    `;
-    const result = await pool.query(query, [userId, username, firstName, lastName, joinedDate]);
-    return result.rows[0];
+const saveUser = async (userId, username, firstName, lastName) => {
+    try {
+        const query = `
+            INSERT INTO users (user_id, username, first_name, last_name)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET 
+                username = EXCLUDED.username,
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [userId, username, firstName, lastName]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error saving user:', error);
+        throw error;
+    }
 };
 
 const getUserById = async (userId) => {
-    const query = 'SELECT * FROM users WHERE user_id = $1';
-    const result = await pool.query(query, [userId]);
-    return result.rows[0];
+    try {
+        const query = 'SELECT * FROM users WHERE user_id = $1';
+        const result = await pool.query(query, [userId]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error getting user:', error);
+        throw error;
+    }
 };
 
 // Role Management
@@ -47,81 +58,30 @@ const getUserRoles = async (userId) => {
     return result.rows;
 };
 
-// Ban Management
-const banUser = async (userId, reason, duration, bannedBy) => {
-    const banUntil = duration ? new Date(Date.now() + duration) : null;
-    const query = `
-        UPDATE users 
-        SET is_banned = true, 
-            ban_reason = $2,
-            ban_until = $3
-        WHERE user_id = $1
-        RETURNING *;
-    `;
-    const result = await pool.query(query, [userId, reason, banUntil]);
-    
-    // Log the infraction
-    await logInfraction(userId, 'BAN', reason, 'BAN', duration, bannedBy);
-    
-    return result.rows[0];
-};
-
-const unbanUser = async (userId) => {
-    const query = `
-        UPDATE users 
-        SET is_banned = false, 
-            ban_reason = null,
-            ban_until = null
-        WHERE user_id = $1
-        RETURNING *;
-    `;
-    return pool.query(query, [userId]);
-};
-
-const getBannedUsers = async () => {
-    const query = `
-        SELECT u.*, i.created_at as ban_start, i.duration as ban_duration
-        FROM users u
-        JOIN infractions i ON u.user_id = i.user_id
-        WHERE u.is_banned = true 
-        AND i.type = 'BAN'
-        AND i.created_at + (i.duration || ' seconds')::interval <= NOW()
-        AND NOT EXISTS (
-            SELECT 1 FROM infractions i2
-            WHERE i2.user_id = i.user_id
-            AND i2.type = 'BAN'
-            AND i2.created_at > i.created_at
-        );
-    `;
-    const result = await pool.query(query);
-    return result.rows;
-};
-
-const getUserBannedChats = async (userId) => {
-    const query = `
-        SELECT DISTINCT chat_id 
-        FROM message_logs 
-        WHERE user_id = $1
-        AND chat_id IN (
-            SELECT chat_id 
-            FROM infractions 
-            WHERE user_id = $1 
-            AND type = 'BAN' 
-            AND created_at >= NOW() - INTERVAL '30 days'
-        )
-    `;
-    const result = await pool.query(query, [userId]);
-    return result.rows;
-};
-
 // Message Logging
 const logMessage = async (messageId, userId, chatId, messageType, content) => {
-    const query = `
-        INSERT INTO message_logs (message_id, user_id, chat_id, message_type, content)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *;
-    `;
-    return pool.query(query, [messageId, userId, chatId, messageType, content]);
+    try {
+        // First, insert into messages table
+        const messageQuery = `
+            INSERT INTO messages (message_id, chat_id, user_id, message_type, content)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (message_id, chat_id) DO NOTHING
+            RETURNING *;
+        `;
+        await pool.query(messageQuery, [messageId, chatId, userId, messageType, content]);
+
+        // Then, insert into message_logs for analytics
+        const logQuery = `
+            INSERT INTO message_logs (message_id, chat_id, user_id, message_type, content)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *;
+        `;
+        const result = await pool.query(logQuery, [messageId, chatId, userId, messageType, content]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error logging message:', error);
+        throw error;
+    }
 };
 
 const deleteMessage = async (messageId, deletedBy) => {
@@ -137,13 +97,33 @@ const deleteMessage = async (messageId, deletedBy) => {
 };
 
 // Infractions
-const logInfraction = async (userId, type, description, actionTaken, duration, enforcedBy) => {
-    const query = `
-        INSERT INTO infractions (user_id, type, description, action_taken, duration, enforced_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *;
-    `;
-    return pool.query(query, [userId, type, description, actionTaken, duration, enforcedBy]);
+const logInfraction = async (userId, type, reason, action, duration, issuedBy) => {
+    try {
+        const query = `
+            INSERT INTO infractions (
+                user_id, 
+                type, 
+                reason, 
+                action, 
+                duration, 
+                issued_by,
+                expires_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 
+                CASE 
+                    WHEN $5 IS NOT NULL 
+                    THEN NOW() + ($5::interval) 
+                    ELSE NULL 
+                END
+            )
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [userId, type, reason, action, duration, issuedBy]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error logging infraction:', error);
+        throw error;
+    }
 };
 
 const getUserInfractions = async (userId) => {
@@ -237,17 +217,47 @@ const getCustomCommand = async (command) => {
 };
 
 // Activity Tracking
-const updateUserActivity = async (userId, type) => {
-    const today = new Date().toISOString().split('T')[0];
-    const query = `
-        INSERT INTO activity_stats (user_id, date, ${type})
-        VALUES ($1, $2, 1)
-        ON CONFLICT (user_id, date)
-        DO UPDATE SET
-            ${type} = activity_stats.${type} + 1
-        RETURNING *;
-    `;
-    return pool.query(query, [userId, today]);
+const updateUserActivity = async (userId, activityType) => {
+    try {
+        // Update user activity log
+        const activityQuery = `
+            INSERT INTO user_activity (user_id, activity_type, activity_data)
+            VALUES ($1, $2, $3)
+            RETURNING *;
+        `;
+        
+        const activityData = {
+            timestamp: new Date(),
+            type: activityType
+        };
+
+        await pool.query(activityQuery, [userId, activityType, activityData]);
+
+        // Update user statistics
+        const statsQuery = `
+            UPDATE users 
+            SET total_messages = CASE 
+                    WHEN $2 = 'messages_sent' THEN total_messages + 1
+                    ELSE total_messages
+                END,
+                total_reactions = CASE 
+                    WHEN $2 = 'reaction_added' THEN total_reactions + 1
+                    ELSE total_reactions
+                END,
+                total_commands = CASE 
+                    WHEN $2 = 'command_used' THEN total_commands + 1
+                    ELSE total_commands
+                END
+            WHERE user_id = $1
+            RETURNING *;
+        `;
+        
+        const result = await pool.query(statsQuery, [userId, activityType]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error updating user activity:', error);
+        throw error;
+    }
 };
 
 const getTopUsers = async (limit = 10) => {
@@ -368,13 +378,15 @@ const updateFeedbackStatus = async (feedbackId, status, reviewedBy) => {
 
 const getExpiredRestrictions = async () => {
     const query = `
-        SELECT DISTINCT i.user_id, i.type, i.duration, i.created_at, u.username, u.first_name, u.last_name,
+        SELECT DISTINCT i.user_id, i.type, i.duration, i.created_at, i.id as infraction_id,
+               u.username, u.first_name, u.last_name,
                m.chat_id
         FROM infractions i
         JOIN users u ON i.user_id = u.user_id
         JOIN message_logs m ON i.user_id = m.user_id
         WHERE i.type IN ('BAN', 'MUTE')
         AND i.created_at + i.duration <= NOW()
+        AND i.processed = false
         AND NOT EXISTS (
             SELECT 1 FROM infractions i2
             WHERE i2.user_id = i.user_id
@@ -387,7 +399,7 @@ const getExpiredRestrictions = async () => {
     return result.rows;
 };
 
-const removeRestriction = async (userId, type) => {
+const removeRestriction = async (userId, type, infractionId) => {
     let query;
     if (type === 'BAN') {
         query = `
@@ -395,18 +407,23 @@ const removeRestriction = async (userId, type) => {
             SET is_banned = false, 
                 ban_reason = null,
                 ban_until = null
-            WHERE user_id = $1
+            WHERE user_id = $1;
+            
+            UPDATE infractions
+            SET processed = true
+            WHERE id = $2
             RETURNING *;
         `;
+        return pool.query(query, [userId, infractionId]);
     } else if (type === 'MUTE') {
-        // For mute, we just log that it's been removed since the actual unmute happens in Telegram
         query = `
-            INSERT INTO infractions (user_id, type, description, action_taken, duration, enforced_by)
-            VALUES ($1, $2, 'Restriction expired automatically', 'UNMUTE', 0, NULL)
+            UPDATE infractions
+            SET processed = true
+            WHERE id = $1
             RETURNING *;
         `;
+        return pool.query(query, [infractionId]);
     }
-    return pool.query(query, [userId]);
 };
 
 const getUserRestrictedChats = async (userId, type) => {
@@ -427,6 +444,125 @@ const getUserRestrictedChats = async (userId, type) => {
     return result.rows;
 };
 
+// Ban Management
+const banUser = async (userId, reason, duration, bannedBy) => {
+    try {
+        const banUntil = duration ? new Date(Date.now() + (duration * 60 * 1000)) : null;
+        
+        // Update user's ban status
+        const userQuery = `
+            UPDATE users 
+            SET is_banned = true,
+                ban_until = $2
+            WHERE user_id = $1
+            RETURNING *;
+        `;
+        await pool.query(userQuery, [userId, banUntil]);
+
+        // Log the infraction
+        return await logInfraction(userId, 'BAN', reason, 'BAN', duration, bannedBy);
+    } catch (error) {
+        logger.error('Error banning user:', error);
+        throw error;
+    }
+};
+
+const unbanUser = async (userId) => {
+    try {
+        const query = `
+            UPDATE users 
+            SET is_banned = false,
+                ban_until = null
+            WHERE user_id = $1
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [userId]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error unbanning user:', error);
+        throw error;
+    }
+};
+
+const getExpiredBans = async () => {
+    try {
+        const query = `
+            SELECT u.user_id, i.chat_id
+            FROM users u
+            JOIN infractions i ON u.user_id = i.user_id
+            WHERE u.is_banned = true
+            AND i.type = 'BAN'
+            AND i.expires_at <= NOW()
+            AND NOT EXISTS (
+                SELECT 1 FROM infractions i2
+                WHERE i2.user_id = i.user_id
+                AND i2.type = 'BAN'
+                AND i2.expires_at > NOW()
+            );
+        `;
+        const result = await pool.query(query);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting expired bans:', error);
+        throw error;
+    }
+};
+
+// Mute Management
+const muteUser = async (userId, chatId, duration, reason, mutedBy) => {
+    try {
+        const mutedUntil = new Date(Date.now() + (duration * 60 * 1000));
+        
+        // Insert into muted_users table
+        const muteQuery = `
+            INSERT INTO muted_users (user_id, chat_id, muted_until, muted_by, reason)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, chat_id) 
+            DO UPDATE SET
+                muted_until = EXCLUDED.muted_until,
+                reason = EXCLUDED.reason
+            RETURNING *;
+        `;
+        await pool.query(muteQuery, [userId, chatId, mutedUntil, mutedBy, reason]);
+
+        // Log the infraction
+        return await logInfraction(userId, 'MUTE', reason, 'MUTE', duration, mutedBy);
+    } catch (error) {
+        logger.error('Error muting user:', error);
+        throw error;
+    }
+};
+
+const getExpiredMutes = async () => {
+    try {
+        const query = `
+            SELECT user_id, chat_id
+            FROM muted_users
+            WHERE muted_until <= NOW();
+        `;
+        const result = await pool.query(query);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting expired mutes:', error);
+        throw error;
+    }
+};
+
+const unmuteMember = async (userId, chatId) => {
+    try {
+        const query = `
+            DELETE FROM muted_users
+            WHERE user_id = $1 AND chat_id = $2
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [userId, chatId]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error unmuting user:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     // User Management
     saveUser,
@@ -437,8 +573,10 @@ module.exports = {
     // Ban Management
     banUser,
     unbanUser,
-    getBannedUsers,
-    getUserBannedChats,
+    getExpiredBans,
+    muteUser,
+    getExpiredMutes,
+    unmuteMember,
     // Message Logging
     logMessage,
     deleteMessage,
