@@ -238,16 +238,31 @@ const getCustomCommand = async (command) => {
 
 // Activity Tracking
 const updateUserActivity = async (userId, type) => {
-    const today = new Date().toISOString().split('T')[0];
-    const query = `
-        INSERT INTO activity_stats (user_id, date, ${type})
-        VALUES ($1, $2, 1)
-        ON CONFLICT (user_id, date)
-        DO UPDATE SET
-            ${type} = activity_stats.${type} + 1
-        RETURNING *;
-    `;
-    return pool.query(query, [userId, today]);
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const query = `
+            INSERT INTO activity_stats (user_id, date, messages_sent, reactions_added, commands_used)
+            VALUES ($1, $2, 
+                CASE WHEN $3 = 'messages_sent' THEN 1 ELSE 0 END,
+                CASE WHEN $3 = 'reaction_added' THEN 1 ELSE 0 END,
+                CASE WHEN $3 = 'command_used' THEN 1 ELSE 0 END
+            )
+            ON CONFLICT (user_id, date)
+            DO UPDATE SET
+                messages_sent = activity_stats.messages_sent + 
+                    CASE WHEN $3 = 'messages_sent' THEN 1 ELSE 0 END,
+                reactions_added = activity_stats.reactions_added + 
+                    CASE WHEN $3 = 'reaction_added' THEN 1 ELSE 0 END,
+                commands_used = activity_stats.commands_used + 
+                    CASE WHEN $3 = 'command_used' THEN 1 ELSE 0 END
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [userId, today, type]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error updating user activity:', error);
+        throw error;
+    }
 };
 
 const getTopUsers = async (limit = 10) => {
@@ -427,6 +442,64 @@ const getUserRestrictedChats = async (userId, type) => {
     return result.rows;
 };
 
+// Ban Management
+const getExpiredBans = async () => {
+    try {
+        const query = `
+            SELECT u.user_id, m.chat_id
+            FROM users u
+            JOIN infractions i ON u.user_id = i.user_id
+            JOIN messages m ON u.user_id = m.user_id
+            WHERE u.is_banned = true
+            AND i.type = 'BAN'
+            AND i.expires_at <= NOW()
+            AND NOT EXISTS (
+                SELECT 1 FROM infractions i2
+                WHERE i2.user_id = i.user_id
+                AND i2.type = 'BAN'
+                AND i2.expires_at > NOW()
+            )
+            GROUP BY u.user_id, m.chat_id;
+        `;
+        const result = await pool.query(query);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting expired bans:', error);
+        throw error;
+    }
+};
+
+// Mute Management
+const getExpiredMutes = async () => {
+    try {
+        const query = `
+            SELECT user_id, chat_id
+            FROM muted_users
+            WHERE muted_until <= NOW();
+        `;
+        const result = await pool.query(query);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting expired mutes:', error);
+        throw error;
+    }
+};
+
+const unmuteMember = async (userId, chatId) => {
+    try {
+        const query = `
+            DELETE FROM muted_users
+            WHERE user_id = $1 AND chat_id = $2
+            RETURNING *;
+        `;
+        const result = await pool.query(query, [userId, chatId]);
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error unmuting member:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     // User Management
     saveUser,
@@ -470,5 +543,8 @@ module.exports = {
     updateFeedbackStatus,
     getExpiredRestrictions,
     removeRestriction,
-    getUserRestrictedChats
+    getUserRestrictedChats,
+    getExpiredBans,
+    getExpiredMutes,
+    unmuteMember
 }; 

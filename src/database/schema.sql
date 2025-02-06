@@ -153,6 +153,17 @@ CREATE TABLE IF NOT EXISTS muted_users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Activity stats table
+CREATE TABLE IF NOT EXISTS activity_stats (
+    stat_id SERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(user_id),
+    date DATE NOT NULL,
+    messages_sent INTEGER DEFAULT 0,
+    reactions_added INTEGER DEFAULT 0,
+    commands_used INTEGER DEFAULT 0,
+    UNIQUE(user_id, date)
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
@@ -164,6 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_event_participants_event_id ON event_participants
 CREATE INDEX IF NOT EXISTS idx_user_activity_user_id ON user_activity(user_id);
 CREATE INDEX IF NOT EXISTS idx_muted_users_user_id ON muted_users(user_id);
 CREATE INDEX IF NOT EXISTS idx_muted_users_chat_id ON muted_users(chat_id);
+CREATE INDEX IF NOT EXISTS idx_activity_stats_user_date ON activity_stats(user_id, date);
 
 -- Add triggers for updating timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
